@@ -543,7 +543,14 @@ describe('native mobile presentation', () => {
     expect(source).toContain('cameraButton.addEventListener("pointerdown", quietMediaPointer)')
     expect(source).toContain('active.isContentEditable')
     expect(source).toContain('label("Scatta foto", "Take photo", "拍照")')
-    expect(source).toContain('cameraButton.setAttribute("role", "option")')
+    expect(source).toContain('assignAttribute(cameraButton, "role", "option")')
+    // The injected action is written through the guarded helpers. An
+    // unconditional class or aria-selected write is itself a mutation record,
+    // and both names are in the surface observer's filter, so it would schedule
+    // the next sync from inside this one.
+    expect(source).toContain('assignClass(cameraButton, "dsh-mobile-media-action")')
+    expect(source).toContain('assignAttribute(cameraButton, "aria-selected", "false")')
+    expect(source).not.toContain('cameraButton.className =')
     expect(source).toContain('nativeItem.className')
     expect(source).toContain('sectionTitle.nextElementSibling')
     expect(source).not.toContain('fileButton')

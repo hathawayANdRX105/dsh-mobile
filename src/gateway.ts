@@ -947,12 +947,6 @@ function isCompressibleContentType(value: string | string[] | undefined): boolea
   const contentType = Array.isArray(value) ? value[0] : value
   if (contentType === undefined) return false
   const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-  // Server-sent events are a live stream, not a body with an end. Compression
-  // holds bytes until a block fills, which delays every event behind it and
-  // defeats the transport; the upstream webserver excludes the same media type
-  // from its own gzip middleware. `/plugins/events` is one such stream, so this
-  // guard also covers the path the bundle routes already passed.
-  if (mediaType === 'text/event-stream') return false
   return mediaType.startsWith('text/')
     || /^(?:application\/(?:javascript|json|xml|x-javascript)|image\/svg\+xml)$/u.test(mediaType)
 }
