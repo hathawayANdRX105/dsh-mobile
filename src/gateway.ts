@@ -145,6 +145,15 @@ const MAX_MOBILE_BOOT_BATCHES = 8
  * memory.
  */
 const MAX_MOBILE_INDEX_CACHE_ENTRIES = 16
+/**
+ * How long a stored document may be served. The document embeds the boot
+ * manifest's bundle URLs, which carry the upstream DSH revision; a DSH restart
+ * or plugin update changes those URLs, and the gateway has no signal for it
+ * beyond re-reading the upstream index. The window bounds how long an updated
+ * upstream can be masked, at the cost of one re-read and rewrite per window
+ * instead of one per page load.
+ */
+const MOBILE_INDEX_CACHE_TTL_MS = 60_000
 const MOBILE_BOOT_UPSTREAM_ATTEMPTS = 4
 const MOBILE_BOOT_RETRY_DELAY_MS = 150
 
@@ -363,6 +372,15 @@ const PROXY_GZIP_LEVEL = 1
 interface StoredMobileIndex {
   readonly body: Buffer
   readonly etag: string
+  readonly at: number
+  /**
+   * Merged batches this document references. A served document points at batch
+   * URLs the gateway assembles on demand, and the batch map is bounded, so the
+   * plans have to travel with the document: a cache hit that skipped
+   * re-registering them could hand out a document whose boot URLs 404 once the
+   * batch map has evicted them.
+   */
+  readonly batches: readonly MobileBootBatchPlan[]
   gzipBody?: Buffer
 }
 
@@ -929,6 +947,12 @@ function isCompressibleContentType(value: string | string[] | undefined): boolea
   const contentType = Array.isArray(value) ? value[0] : value
   if (contentType === undefined) return false
   const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+  // Server-sent events are a live stream, not a body with an end. Compression
+  // holds bytes until a block fills, which delays every event behind it and
+  // defeats the transport; the upstream webserver excludes the same media type
+  // from its own gzip middleware. `/plugins/events` is one such stream, so this
+  // guard also covers the path the bundle routes already passed.
+  if (mediaType === 'text/event-stream') return false
   return mediaType.startsWith('text/')
     || /^(?:application\/(?:javascript|json|xml|x-javascript)|image\/svg\+xml)$/u.test(mediaType)
 }
@@ -945,19 +969,6 @@ function canCompressResponse(request: IncomingMessage, response: IncomingMessage
     && response.headers['content-range'] === undefined
     && response.headers['content-encoding'] === undefined
     && isCompressibleContentType(response.headers['content-type'])
-}
-
-/**
- * Whether a body-less 304 still identifies a representation the gateway would
- * have compressed. A 304 carries no media type, so eligibility has to come from
- * the request target: the bundle and asset routes always serve a compressible
- * media type, and `/api/**` responses that opted into compression on their last
- * full response kept a weakened ETag the client can match.
- */
-function canRevalidateCompressedBody(request: IncomingMessage, proxied: IncomingMessage): boolean {
-  const pathname = request.url?.split('?', 1)[0] ?? ''
-  if (pathname.startsWith('/plugins/') || pathname.startsWith('/assets/')) return true
-  return (pathname === '/api' || pathname.startsWith('/api/')) && weakenEntityTag(proxied.headers.etag) !== undefined
 }
 
 function revisionedStaticCacheControl(
@@ -1987,11 +1998,9 @@ export class MobileAccessGateway {
         const etag = `"${createHash('sha256').update(body).digest('hex')}"`
         const responseHeaders: Record<string, string | number> = { ETag: etag }
         if (mtime !== undefined) responseHeaders['Last-Modified'] = mtime.toUTCString()
-        // `compat.js` is a render-blocking script in front of every DSH bundle on
-        // every cold start. Without a policy the WebView revalidates by heuristic
-        // and often re-downloads it; an explicit `no-cache` makes the ETag above
-        // the authority, so a warm start costs a 304 instead of a body.
-        responseHeaders['Cache-Control'] = 'private, no-cache'
+        // No cache directive here on purpose: these four files are the ones the
+        // `/mobile` flow rewrites by hand and that the phone must re-read, so the
+        // `no-store` set by setSecurityHeaders stays the governing policy.
         if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
           setSecurityHeaders(response, this.tlsEnabled)
           response.writeHead(304, responseHeaders)
@@ -2460,13 +2469,21 @@ export class MobileAccessGateway {
       // The stock diagnostic entrypoint carries no module selection, so its
       // document depends only on the CSRF cookie the client will send.
       const preference = stockFrontend ? undefined : await this.clientModulePreferences.read(authorization.deviceId)
+      // The upstream request keeps the caller's own URL, and the document it
+      // answers with can differ per URL, so the target is part of the identity.
+      const target = request.url ?? '/'
       const cacheKey = preference === undefined
-        ? `stock:${csrfCookie}`
-        : `${preference.excludedClientModules.join(',')}:${csrfCookie}:${await this.mobileLayoutStamp()}`
+        ? `stock:${target}:${csrfCookie}`
+        : `${target}:${preference.excludedClientModules.join(',')}:${csrfCookie}:${await this.mobileLayoutStamp()}`
       let stored = this.mobileIndexCache.get(cacheKey)
+      if (stored !== undefined && Date.now() - stored.at >= MOBILE_INDEX_CACHE_TTL_MS) {
+        this.mobileIndexCache.delete(cacheKey)
+        stored = undefined
+      }
       if (stored === undefined) {
         const index = await this.fetchAuthenticatedUpstreamIndex(operation.signal, request)
         let body: Buffer
+        let batches: readonly MobileBootBatchPlan[] = []
         if (preference === undefined) body = Buffer.from(ensureMobileGatewayMarker(index.html))
         else {
           try {
@@ -2480,7 +2497,7 @@ export class MobileAccessGateway {
                   excludedClientModules: preference.excludedClientModules,
                 }
             const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
-            for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
+            batches = rewritten.batches
             body = Buffer.from(rewritten.html)
           } catch (error) {
             if (error instanceof ExcludedClientModulesError) {
@@ -2505,7 +2522,7 @@ export class MobileAccessGateway {
             throw new HttpError(502, 'upstream_unavailable')
           }
         }
-        stored = { body, etag: `"${createHash('sha256').update(body).digest('hex')}"` }
+        stored = { body, batches, at: Date.now(), etag: `"${createHash('sha256').update(body).digest('hex')}"` }
         this.mobileIndexCache.set(cacheKey, stored)
         while (this.mobileIndexCache.size > MAX_MOBILE_INDEX_CACHE_ENTRIES) {
           const oldest = this.mobileIndexCache.keys().next().value as string | undefined
@@ -2514,6 +2531,10 @@ export class MobileAccessGateway {
         }
       }
       operation.signal.throwIfAborted()
+      // Re-register on every serve, including cache hits: this keeps the batch
+      // map's recency ordering aligned with what devices are actually loading,
+      // so the documents handed out still resolve their boot URLs.
+      for (const batch of stored.batches) this.rememberMobileBootBatch(batch)
       // The document is rewritten per request, so the upstream validator never
       // describes these bytes. Answer revalidation from the stored ETag instead
       // of dropping the client's conditional headers on the floor.
@@ -2527,7 +2548,9 @@ export class MobileAccessGateway {
         // module choice; let the phone revalidate rather than reuse a stale boot.
         'Cache-Control': 'private, no-cache',
       }
-      if (compress) addVaryAcceptEncoding(responseHeaders)
+      // The body depends on Accept-Encoding whether or not this request was
+      // compressed, so the header cannot be conditional on the current request.
+      addVaryAcceptEncoding(responseHeaders)
       // The proxied GUI document: it must be able to frame its own surfaces.
       setSecurityHeaders(response, this.tlsEnabled, 'proxied')
       if (revalidated) {
@@ -3019,7 +3042,8 @@ export class MobileAccessGateway {
         headers['content-encoding'] = 'gzip'
       } else if (statusCode === 304 && (request.method === 'GET' || request.method === 'HEAD')
         && request.headers.range === undefined
-        && canRevalidateCompressedBody(request, proxied)) {
+        && (request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
+          || request.url?.split('?', 1)[0]?.startsWith('/assets/') === true)) {
         // A 304 has no body or media type to identify gateway gzip eligibility.
         // Weakening remains valid for unchanged or already encoded upstream bytes.
         if (proxied.headers['content-encoding'] === undefined && acceptsGzip(request.headers['accept-encoding'])) {
