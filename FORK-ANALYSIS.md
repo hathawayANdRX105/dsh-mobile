@@ -93,16 +93,32 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 
 **修法**：观察目标收窄到会话滚动容器；去掉 `characterData`；两次 `querySelector` 合并成一次。
 
-### P1 · compat.js 在关键路径上且没有任何 Cache-Control
+### P1 · compat.js 在关键路径上，且以未压缩形式下发
 
-48 KB 的 core-js 以**同步解析阻塞**的 `<script>` 注入在所有 DSH 脚本之前，
-但 `/mobile-access/compat.js` 的响应只带 ETag + Last-Modified，没有 `Cache-Control`，
-冷启动时往往被重新下载并重新解析。
+48 KB 的 core-js 以**同步解析阻塞**的 `<script>` 注入在所有 DSH 脚本之前。
+
+> 更正：本文档早先写"它没有任何 `Cache-Control`"，这是**错的**。
+> `setSecurityHeaders` 会统一设置 `Cache-Control: no-store`，而且单测
+> （`tests/gateway.test.ts`，custom.css / custom.js / compat.js 共 4 处）把
+> `no-store` 钉住了。这个策略是**有意**的：这些正是 `/mobile` 流程手工改写、
+> 手机必须重读的文件，改掉它会破坏"保存后几秒内生效"的承诺。
+> 正确的优化只是在 `no-store` 之上**加压缩**，把每次冷启动的 48 KB 降到约 16 KB。
 
 ### P1 · `/api/**` 的 JSON 从不压缩
 
 网关的压缩门禁只放行 `/plugins/` 和 `/assets/` 前缀，会话列表、会话状态、设置等
 所有 `/api/` JSON 响应都是未压缩原样下发。实测有代表性的会话状态负载约 2.8× 的压缩空间。
+
+### 反例 · 不要试图把 SSE 从压缩中排除
+
+代码审查会让人觉得 `text/event-stream` 不该被压缩（压缩要等块填满才出字节，
+会推迟实时流的每个事件），而 `/plugins/events` 确实会在旧白名单下被压缩。
+
+**但实测推翻了这个推理**：只把这处守卫加到未改动的网关上，boot 冒烟即失败——
+移动端客户端始终不就绪，`/plugins/events` 报 `ERR_INCOMPLETE_CHUNKED_ENCODING`，
+客户端抛出 `renderSlot('root') before any 'root' registration`；去掉守卫后同一份
+构建通过。该 SSE 流在引导期是被依赖的。**改动此处前务必先跑 `npm run smoke:dsh-boot`。**
+
 
 ### P2 · index.html 每次都重取、重改写、无 ETag、不压缩
 
@@ -194,15 +210,25 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 
 ## 五、建议的 fork 改造顺序
 
-1. 修 P0 死循环（幂等写入 / 相机按钮移出 sync）——改动最小，收益最大。
-2. 修 P0 的 `firstByClassSuffix` 物化 + 加 memo。
-3. 收窄两个全文档观察器。
-4. index.html 缓存 + ETag + gzip + 不删客户端验证头；去掉重复的 `parseMobileBootPlan`。
-5. 体积探测改为按 boot `rev` 缓存，或直接用 `Content-Length`。
-6. 放开 `/api/**` JSON 压缩；gzip 降到 level 1。
-7. CSS：`100vh`→`100dvh`；`width`/`margin-right` 过渡改 `transform`；去掉 `will-change:width`；
-   加 `visualViewport` 键盘内缩变量；给 compat.js 加 `Cache-Control`。
-8. 两个 2 秒轮询改 `fs.watch`。
+已在 `fix/transport-and-jank` 分支完成的（见该分支提交）：
+
+1. ~~修 P0 死循环（幂等写入 / 相机按钮移出 sync）~~ ✅ `perf(client)`
+2. ~~修 P0 的 `firstByClassSuffix` 物化~~ ✅ 同上一并（加 memo 未做）
+3. ~~index.html 缓存 + ETag + gzip~~ ✅ `perf(gateway)`；并在 `fix(gateway)` 中修正了
+   缓存键漏请求 URL、batch 计划未随缓存保留、未设时限三个缺陷
+4. ~~体积探测优先用 `Content-Length`~~ ✅（按 `rev` 键控未做）
+5. ~~放开 `/api/**` JSON 压缩；gzip 降到 level 1~~ ✅
+6. ~~CSS：`100vh`→`100dvh`；去掉 `will-change:width`~~ ✅ `fix(ui)`
+
+未做，仍值得做：
+
+7. 收窄两个挂在 `documentElement` 上、带 `characterData` 的观察器（流式输出每个 token 都触发）。
+8. `width` / `margin-right` 过渡改 `transform`——会改变布局契约，需要单独一轮。
+9. 加 `visualViewport` 键盘内缩变量（目前全插件没有任何 `visualViewport` 处理，
+   软键盘弹出时会遮挡输入框）。
+10. 去掉 `rewriteMobileIndexWithBatch` 内部重复的 `parseMobileBootPlan`（每请求跑两遍）。
+11. 两个 2 秒轮询改 `fs.watch`。
+12. 两个缓存目前按 TTL 失效；改为按 boot `rev` 键控更准。
 
 ## 六、复现与验证
 
