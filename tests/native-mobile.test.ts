@@ -543,7 +543,15 @@ describe('native mobile presentation', () => {
     expect(source).toContain('cameraButton.addEventListener("pointerdown", quietMediaPointer)')
     expect(source).toContain('active.isContentEditable')
     expect(source).toContain('label("Scatta foto", "Take photo", "拍照")')
-    expect(source).toContain('cameraButton.setAttribute("role", "option")')
+    expect(source).toContain('assignAttribute(cameraButton, "role", "option")')
+    // The final class is resolved before a single assignment. Writing the
+    // placeholder first and the native class second made both writes differ from
+    // the current value on every pass, and each write is a mutation record the
+    // surface observer re-enters, so the sync kept rescheduling itself a frame
+    // later. Matched loosely because the transform may minify or space it.
+    expect(source).toMatch(/assignClass\(cameraButton\s*,\s*nativeItem\s*===\s*(?:undefined|void 0)\s*\?/u)
+    expect(source).toContain('assignAttribute(cameraButton, "aria-selected", "false")')
+    expect(source).not.toContain('cameraButton.className =')
     expect(source).toContain('nativeItem.className')
     expect(source).toContain('sectionTitle.nextElementSibling')
     expect(source).not.toContain('fileButton')

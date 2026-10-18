@@ -30,7 +30,10 @@ describe('installed default extension worker entry', () => {
     const npmCli = process.env.npm_execpath
     if (npmCli === undefined) throw new Error('run the package smoke through npm so npm_execpath identifies the CLI')
     const packed = await run(process.execPath, [npmCli, 'pack', '--ignore-scripts', '--json', '--pack-destination', root], { cwd: staging })
-    const filename = (JSON.parse(packed.stdout) as { filename: string }[])[0]?.filename
+    // npm 11 reports `pack --json` as an array; npm 12 reports an object keyed by
+    // package name. Accept both so the suite runs on either CLI.
+    const reported = JSON.parse(packed.stdout) as { filename?: string }[] | Record<string, { filename?: string }>
+    const filename = Array.isArray(reported) ? reported[0]?.filename : Object.values(reported)[0]?.filename
     if (filename === undefined) throw new Error('npm pack did not return a filename')
     const installRoot = join(root, 'installed'); await mkdir(installRoot)
     await run(process.execPath, [npmCli, 'install', '--prefix', installRoot, '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', join(root, filename)])
