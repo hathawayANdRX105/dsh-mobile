@@ -32,7 +32,7 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.11**。改善历史加载时的滚动稳定性，保留手动加载入口，并增加脱敏的 HTTP 认证拒绝诊断。Android App **0.6.5** 独立更新取消连接、超时与加载等待。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.11-fork.1**。基于上游 0.6.11 的 fork 优化构建：修复 60fps 自持循环与传输层延迟，移除抽屉/右侧栏的不可合成属性过渡。Android App **0.6.5** 独立更新取消连接、超时与加载等待。[更新与下载](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.11-fork.1) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 

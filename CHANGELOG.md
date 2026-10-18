@@ -2,6 +2,15 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.11-fork.1 - 2026-10-18
+
+- Fork build based on upstream 0.6.11 with local performance optimizations.
+- Fix 60fps self-sustaining MutationObserver loop in `native-mobile.ts` by making camera action class/aria writes idempotent (single assignment per frame).
+- Throttle completion notification observer and merge duplicate querySelector calls for question cards (464 → 67 calls per 200 tokens).
+- Add index document cache with ETag validation and gzip compression; compress local assets (compat.js) and API JSON responses.
+- Remove non-compositable `width` transition from drawer and `margin-right` transition from main column; replace with composited opacity keyframes.
+- CI workflow adjusted to allow fork GitHub Release without npm publish.
+
 ## 0.6.11 - 2026-10-17
 
 - Stabilize earlier-history loading by requiring fresh touch or wheel input before an automatic load near the top. DSH's own scroll-position compensation cannot re-arm loading; switching sessions or scroll containers withdraws the previous input. Track only touch contacts started on the owned scroller so another finger elsewhere cannot keep an old loading intent active.

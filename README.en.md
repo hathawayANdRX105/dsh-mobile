@@ -32,7 +32,7 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.11**. Improve scroll stability while loading history, retain a manual loading action, and add sanitized HTTP authentication-rejection diagnostics. Android app **0.6.5** independently improves connection cancellation, timeouts and loading presentation. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.11-fork.1**. Fork-optimized build based on upstream 0.6.11: fixes 60fps self-sustaining loop and transport latency; removes non-compositable drawer/rightbar transitions. Android app **0.6.5** independently improves connection cancellation, timeouts and loading presentation. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.11-fork.1) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
