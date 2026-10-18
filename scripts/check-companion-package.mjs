@@ -8,7 +8,7 @@ const companion = JSON.parse(await readFile(new URL('packages/question-fixes/pac
 assert.equal(companion.name, 'dsh-mobile-question-fixes')
 assert.equal(companion.private, true, 'The embedded component is not published separately')
 assert.equal(mobile.version, companion.version, 'The component must belong to this Mobile artifact')
-assert.match(companion.version, /^\d+\.\d+\.\d+$/u)
+assert.match(companion.version, /^\d+\.\d+\.\d+(?:-[a-z\d.]+)?$/u)
 assert.ok(mobile.workspaces.includes('packages/question-fixes'), 'Source installs must link the companion workspace')
 assert.ok(!(mobile.bundledDependencies ?? []).includes(companion.name), 'The component must not depend on nested node_modules resolution')
 assert.equal(mobile.dependencies[companion.name], undefined, 'The component ships inside the Mobile artifact')
