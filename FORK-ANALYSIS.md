@@ -28,9 +28,9 @@ DSH Mobile Gateway（Host face，跑在 dsh web 进程内的一个 worker thread
 
 ## 二、卡顿根因（按影响排序）
 
-### P0 · 自持的 60fps MutationObserver → rAF 死循环
+### P0 · 自持的 60fps MutationObserver → rAF 死循环（已实测确认并修复）
 
-`src/native-mobile.ts:1793-1795` 注册了一个观察 `document.body` 整棵子树、
+`src/native-mobile.ts` 注册了一个观察 `document.body` 整棵子树、
 监听 `class` / `aria-selected` 的 MutationObserver，回调直接 `requestAnimationFrame(sync)`：
 
 ```ts
@@ -42,28 +42,28 @@ observer.observe(document.body, {
 })
 ```
 
-而 `sync()` → `placeCameraAction()`（`src/native-mobile.ts:1754`）里有**未做幂等判断**的属性写入：
+而 `sync()` → `placeCameraAction()` 里写 `class` 与 `aria-selected`。按 DOM 规范，
+`className` 赋值器和 `setAttribute()` 都会入队一条 mutation record，**无论新值是否与旧值相同**，
+于是闭环成立：`sync()` → 写属性 → observer 微任务 → `schedule()` → `rAF(sync)` → 循环。
 
-```ts
-cameraButton.className = 'dsh-mobile-media-action'   // :1357
-cameraButton.className = nativeItem.className       // :1367
-cameraButton.setAttribute('aria-selected', 'false') // :1376
-```
+**关键细节（第一版修复失败的原因）**：只把写入改成"先比较再赋值"**不够**。
+`placeCameraAction` 是**两步赋值**——先设占位类 `'dsh-mobile-media-action'`，
+下一句再覆盖成原生菜单的类名。两次写入**都与当前值不同**，所以每次 sync 仍然产生
+两条 mutation record，闭环照旧。实测证据：89 次 sync 对应 178 次 `className` 写入，正好 2 次/轮。
 
-按 DOM 规范，`className` 赋值器和 `setAttribute()` 都会入队一条 mutation record，
-**无论新值是否与旧值相同**。一旦 `cameraButton` 挂载（`:1385` 附近的 `lastItem.after(...)`，
-这一处有正确的守卫，所以 DOM 结构不会自我复制），闭环成立：
+**修法**：先算出最终类名，只赋一次。这样重复的 sync 会收敛到同一个值、不再写入。
 
-`sync()` → 写 `class`/`aria-selected` → observer 微任务 → `schedule()` → `rAF(sync)` → 循环。
+实测（输入框附件菜单打开、页面静置 2 秒）：
 
-结果：**只要打开一个带输入框的会话，页面就永远以每帧一次全量扫描的节奏空转**，
-CPU 持续占用、滚动与输入掉帧。这与"手机上明显卡顿"的主观描述完全吻合。
+| | rAF 回调 | script | style 重算 | tasks |
+| --- | --- | --- | --- | --- |
+| 基线 | 119（≈60/秒） | 113.7 ms | **442.8 ms** | 600.0 ms |
+| 只做幂等判断 | 119 | 97.0 ms | 543.0 ms | 689.9 ms |
+| **先算后赋一次** | **0** | **0.0 ms** | **0.0 ms** | **0.8 ms** |
 
-对照参考：紧邻的 `setCameraActionDisabled`（`:1388-1391`）恰恰做了
-`if (cameraButton.disabled !== disabled)` 判断——同一文件里两种写法并存。
-
-**修法**：把 `className` / `setAttribute` 改成幂等写入；更好的做法是把相机按钮的定位
-从 `sync()` 里挪出，按 `composerCard` 挂载一次。
+注意这个循环**只在附件菜单打开时成立**：菜单关闭时 `placeCameraAction` 找不到
+"添加"分组，走 `cameraButton.remove()` 分支，`remove()` 对已脱离节点不产生记录，
+所以菜单关闭时基线也只有 5 次 rAF / 2 秒。这也说明只测"静置"会漏掉这个 bug。
 
 ### P0 · sync() 每帧把整棵会话子树物化 5 次
 
@@ -83,15 +83,29 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 **修法**：直接遍历 NodeList 短路返回；或改用 `[class*="_viewArea"]` 这类属性选择器，
 让引擎走 class 选择器索引；再给解析结果加一层按 root 的 memo。
 
-### P1 · 两个挂在 documentElement 上的观察器 + characterData
+### P1 · 两个挂在 documentElement 上的观察器 + characterData（已实测确认并修复）
 
-- `observeTaskActivity(document.documentElement, …)`（`src/client.ts`，编译产物 `lib/client.js:3154`）
+- `observeTaskActivity(document.documentElement, …)`（`src/task-notify.ts`）
   带 `characterData: true, subtree: true`——**流式输出的每一个 token 都会触发**。
   回调里每次跑 2 次全文档 `querySelector`（`hasPendingInputQuestion` 与
-  `pendingInputQuestionKey` 查的是同一个选择器）+ `document.title.normalize('NFC')` + 正则。
+  `pendingInputQuestionKey` 查的是**同一个选择器**）+ `document.title.normalize('NFC')` + 正则。
 - voice-session 的观察器同样是 `document.documentElement` 全文档 + 每个增删节点跑 `containsVoiceRow`。
 
-**修法**：观察目标收窄到会话滚动容器；去掉 `characterData`；两次 `querySelector` 合并成一次。
+实测（模拟 200 个 token，每次 mutation 让出一个任务边界，与真实 token 到达一致）：
+
+| | querySelector 调用 | script | 榜首选择器 |
+| --- | --- | --- | --- |
+| 基线 | 464 | 40.2 ms | `[data-question-key],[data-plan-review-key]` × 402 |
+| **合并查询 + 节流** | **67** | **4.0 ms** | `[class]` × 8（那个选择器已跌出榜） |
+
+402 / 200 = **每个 token 两次全文档查询**，且查的是同一个选择器——一半是纯重复。
+
+**修法（已实施）**：`readPendingInputQuestion` 一次解析、同时给出"有没有卡片"和"卡片的 key"；
+观察器改为**前导节流**（首个变化立即评估，窗口内的后续批次合并成一次尾部评估，
+锚点定时器与 visibilitychange 仍立即评估，所以决定通知的状态不会被压后）。
+
+未做：观察目标收窄到会话滚动容器、去掉 `characterData`。节流已经把每个 token 的成本
+压到接近零，进一步收窄需要先确认弹窗等 portal 节点不会被漏掉。
 
 ### P1 · compat.js 在关键路径上，且以未压缩形式下发
 
@@ -104,10 +118,18 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 > 手机必须重读的文件，改掉它会破坏"保存后几秒内生效"的承诺。
 > 正确的优化只是在 `no-store` 之上**加压缩**，把每次冷启动的 48 KB 降到约 16 KB。
 
-### P1 · `/api/**` 的 JSON 从不压缩
+### P1 · `/api/**` 的压缩门禁：实际收益比想象中小得多（已更正）
 
-网关的压缩门禁只放行 `/plugins/` 和 `/assets/` 前缀，会话列表、会话状态、设置等
-所有 `/api/` JSON 响应都是未压缩原样下发。实测有代表性的会话状态负载约 2.8× 的压缩空间。
+网关的 `canCompressResponse` 只放行 `/plugins/` 和 `/assets/` 前缀。
+
+> 更正：本文档早先据此断言"`/api/**` JSON 从不压缩"，并称约 2.8× 压缩空间。
+> **实测推翻了它**：在一次刷新中捕获的 20 个 `/api/**` 200 响应**全部**带
+> `Content-Encoding: gzip`。原因是上游 DSH 自己的 webserver 有 gzip 中间件，
+> 网关只在 `content-encoding` 为空时才自己压；所以 `/api/**` 早就被上游压过了。
+> 那个 2.8× 是对负载本身算的，不是对实际链路上缺失的压缩算的。
+
+所以把门禁改为按响应媒体类型判断，**价值有限**（只覆盖上游没压的响应），
+不构成主要优化项。真正被它改变的是**正确性边界**，不是带宽。
 
 ### 反例 · 不要试图把 SSE 从压缩中排除
 
@@ -212,23 +234,28 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 
 已在 `fix/transport-and-jank` 分支完成的（见该分支提交）：
 
-1. ~~修 P0 死循环（幂等写入 / 相机按钮移出 sync）~~ ✅ `perf(client)`
-2. ~~修 P0 的 `firstByClassSuffix` 物化~~ ✅ 同上一并（加 memo 未做）
-3. ~~index.html 缓存 + ETag + gzip~~ ✅ `perf(gateway)`；并在 `fix(gateway)` 中修正了
+1. ~~修 P0 死循环~~ ✅ `perf(client)` 两次：先加幂等判断（不够），再改成"先算后赋一次"。
+   实测 443ms 样式重算 / 2 秒 → 0。
+2. ~~修 P0 的 `firstByClassSuffix` 物化~~ ✅（加 memo 未做）
+3. ~~收窄/节流两个挂在 `documentElement` 上、带 `characterData` 的观察器~~ ✅
+   改为合并查询 + 前导节流：每个 token 的脚本成本 40.2ms → 4.0ms（200 token）
+4. ~~index.html 缓存 + ETag + gzip~~ ✅ `perf(gateway)`；并在 `fix(gateway)` 中修正了
    缓存键漏请求 URL、batch 计划未随缓存保留、未设时限三个缺陷
-4. ~~体积探测优先用 `Content-Length`~~ ✅（按 `rev` 键控未做）
-5. ~~放开 `/api/**` JSON 压缩；gzip 降到 level 1~~ ✅
-6. ~~CSS：`100vh`→`100dvh`；去掉 `will-change:width`~~ ✅ `fix(ui)`
+5. ~~体积探测优先用 `Content-Length`~~ ✅（按 `rev` 键控未做）
+6. ~~压缩门禁改按媒体类型~~ ✅（实测收益有限，见上文更正）
+7. ~~CSS：`100vh`→`100dvh`；去掉 `will-change:width`~~ ✅ `fix(ui)`
 
-未做，仍值得做：
+未做，仍值得做（按实测价值排序）：
 
-7. 收窄两个挂在 `documentElement` 上、带 `characterData` 的观察器（流式输出每个 token 都触发）。
 8. `width` / `margin-right` 过渡改 `transform`——会改变布局契约，需要单独一轮。
+   这是当前唯一还没处理的、每帧都在发生的布局成本。
 9. 加 `visualViewport` 键盘内缩变量（目前全插件没有任何 `visualViewport` 处理，
-   软键盘弹出时会遮挡输入框）。
+   软键盘弹出时会遮挡输入框）。属于可用性问题，不是性能问题。
 10. 去掉 `rewriteMobileIndexWithBatch` 内部重复的 `parseMobileBootPlan`（每请求跑两遍）。
 11. 两个 2 秒轮询改 `fs.watch`。
 12. 两个缓存目前按 TTL 失效；改为按 boot `rev` 键控更准。
+13. 观察目标收窄到会话滚动容器、去掉 `characterData`——节流后收益已经很小，
+    且要确认 portal 弹窗不会被漏掉。
 
 ## 六、复现与验证
 
@@ -241,5 +268,28 @@ npm run smoke:mobile-compat
 npm run smoke:composer-keyboard
 ```
 
-P0 死循环可以用 Performance 面板验证：打开一个会话后静置，
-主线程应持续出现 60fps 的脚本帧；打补丁后应立即停止。
+### 本文数字是怎么来的
+
+上面所有数字来自一个临时测量脚本（不在仓库里），它复用
+`scripts/mobile-boot-fixture.mjs` 的 `createMobileProfile` / `launchDsh` /
+`openPairing` / `pairMobilePage`，把打包好的插件装进一个真实的 DSH，
+用 390×844 的手机视口配对后做三件事：
+
+1. **主线程成本**：CDP `Performance.getMetrics` 取 `ScriptDuration` /
+   `RecalcStyleDuration` / `LayoutDuration` / `TaskDuration` 的窗口差值。
+2. **观察器行为**：在页面里包一层 `MutationObserver`、`requestAnimationFrame`，
+   以及 `querySelector` / `querySelectorAll` / `setAttribute` / `className` 赋值器，
+   按选择器和目标元素计数——这样才能指名"谁在写、写了几次"，而不是靠读代码推断。
+3. **传输**：CDP `Network` 事件记录状态码、`content-encoding`、字节数与缓存来源。
+
+**关键教训：只测"静置"会漏掉 P0 循环。** 循环只在输入框附件菜单打开时成立，
+必须显式点开菜单再测。第一版修复之所以"看起来对但没用"，就是因为没做这个区分。
+
+### 关于 304
+
+我的改动给界面文档加了 `ETag` 与 `Cache-Control: private, no-cache`，但在这个无头
+测量环境里**观测不到 304**。做了对照才确认原因：连 `/assets/*` 和 `/plugins/*?rev=`
+（带 `max-age=31536000, immutable`）在第二次导航时也是 `disk=false`、且不发
+`if-none-match`。也就是说**该浏览器上下文根本不用 HTTP 缓存**，所以这不是响应头的问题，
+只是无法在这里验证。服务端缓存（避免重取上游 index 与重跑改写）的收益与浏览器缓存无关，
+仍然成立。
