@@ -544,11 +544,12 @@ describe('native mobile presentation', () => {
     expect(source).toContain('active.isContentEditable')
     expect(source).toContain('label("Scatta foto", "Take photo", "拍照")')
     expect(source).toContain('assignAttribute(cameraButton, "role", "option")')
-    // The injected action is written through the guarded helpers. An
-    // unconditional class or aria-selected write is itself a mutation record,
-    // and both names are in the surface observer's filter, so it would schedule
-    // the next sync from inside this one.
-    expect(source).toContain('assignClass(cameraButton, "dsh-mobile-media-action")')
+    // The final class is resolved before a single assignment. Writing the
+    // placeholder first and the native class second made both writes differ from
+    // the current value on every pass, and each write is a mutation record the
+    // surface observer re-enters, so the sync kept rescheduling itself a frame
+    // later. Matched loosely because the transform may minify or space it.
+    expect(source).toMatch(/assignClass\(cameraButton\s*,\s*nativeItem\s*===\s*(?:undefined|void 0)\s*\?/u)
     expect(source).toContain('assignAttribute(cameraButton, "aria-selected", "false")')
     expect(source).not.toContain('cameraButton.className =')
     expect(source).toContain('nativeItem.className')

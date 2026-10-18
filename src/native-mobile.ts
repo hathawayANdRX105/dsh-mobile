@@ -1385,9 +1385,6 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     // Reuse the current DSH option classes so this injected action follows the
     // native menu's spacing, colors, and dark-mode states instead of creating a
     // second mobile-only visual language.
-    // Every write below is conditional: this runs from the surface sync, which
-    // the observer re-enters on any `class` or `aria-selected` write.
-    assignClass(cameraButton, 'dsh-mobile-media-action')
     const nativeItem = (() => {
       let sibling = sectionTitle.nextElementSibling
       while (sibling instanceof HTMLElement && sibling.getAttribute('role') !== 'presentation') {
@@ -1396,8 +1393,14 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       }
       return undefined
     })()
+    // Resolve the final class before touching the element. Assigning the
+    // placeholder first and the native class second made both writes differ from
+    // the current value on every pass, so each surface sync still produced two
+    // `class` mutation records, the observer re-entered, and the sync ran again
+    // one frame later. One assignment that converges on the same value is what
+    // stops that loop.
+    assignClass(cameraButton, nativeItem === undefined ? 'dsh-mobile-media-action' : nativeItem.className)
     if (nativeItem !== undefined) {
-      assignClass(cameraButton, nativeItem.className)
       const cameraIcon = cameraButton.firstElementChild
       const cameraLabel = cameraButton.lastElementChild
       const nativeIcon = firstByClassSuffix(nativeItem, '_itemIcon')
