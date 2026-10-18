@@ -172,7 +172,7 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 
 | 现象 | 位置 | 原因 | 状态 |
 |---|---|---|---|
-| 抽屉 / 详情面板跟手发滞 | `.dshm-drawer` | `width` / `margin-right` 过渡不可合成，每帧重排；`box-shadow: 18px 0 46px` 每帧重光栅化 | **实测不构成阻塞点，未改**（见下） |
+| 抽屉 / 详情面板跟手发滞 | `.dshm-drawer` / `.dshm-main` | `width` / `margin-right` 过渡不可合成，每帧重排（实测 8–15 次布局/次切换） | ✅ 已移除这两处过渡，改为合成动画（见下） |
 | 移动访问面板底部被裁掉 | `.dsh-mobile-control__panel` | `calc(100vh - 140px)`，而同包其它全高规则都用 `dvh` | ✅ 已改为 `vh` + `dvh` 回退对 |
 | 软键盘弹出时输入框被遮挡 | 全包 | 网关注入的 viewport meta 没有 `interactive-widget`，键盘只缩视觉视口、`100dvh` 不变；而全插件**没有任何 `visualViewport` 处理** | ✅ 已补（见下） |
 | 长会话里越滚越卡 | `src/mobile-layout.ts` | `firstByClassSuffix` 的物化开销 | ✅ 已改为短路遍历 |
@@ -201,9 +201,17 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 可靠的（与内容量无关），但**绝对毫秒**是在一个异常轻的侧栏上测的。你手机上是真实会话
 列表，每次重排的代价可能高得多——这大概就是"跟手发滞"的来源。
 
-**因此这是一个需要你决定的取舍**：唯一的根治办法是**不再动画 `width`**（抽屉改为直接
-打开/关闭，或改为纯 `transform` 位移）。代价是视觉上从"滑出"变成"弹出"。这不是我能
-替你决定的视觉偏好，所以我没有擅自改——你说了要改，我就把数据和这个取舍摆出来。
+**已实施（`fix(ui)`）**：唯一的根治办法是**不再动画 `width`**，现已落地：
+
+- 抽屉 `width` 与主列 `margin-right` 都从 `transition` 中移除（两者都不可合成）。
+- 打开动效改为抽屉上的 `opacity` keyframes 动画——纯合成属性，不触发布局。
+- 子元素保持原来的静止偏移（`translateX(-6px)` / `opacity:.94`），**关闭态 56px 轨道的
+  外观与之前完全一致**。
+- `prefers-reduced-motion` 同时关闭该动画。
+
+`clip-path` 揭示与"子元素固定宽度"两种替代方案都实测无效，已回退。
+
+代价是打开时面板边缘直接到位（不再有 240ms 的宽度滑动），只剩一次淡入。
 
 **关于软键盘**：`resolveKeyboardInset(layoutHeight, visualHeight, visualOffsetTop)`
 取布局视口与视觉视口的差值，并在主列底部预留。它同时覆盖两种情况——浏览器若已经
