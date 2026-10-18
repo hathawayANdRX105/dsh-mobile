@@ -98,6 +98,39 @@ export function isWideViewportLayout(viewportWidth: number): boolean {
   return viewportWidth >= WIDE_LAYOUT_MIN_WIDTH_PX
 }
 
+/**
+ * Smallest covered height treated as an on-screen keyboard.
+ *
+ * Browser chrome that shows and hides changes the layout viewport too, so it
+ * cancels out of the difference below. A threshold only rejects the few pixels
+ * of rounding and overscroll that would otherwise reserve a visible gap.
+ */
+const KEYBOARD_INSET_MIN_PX = 60
+
+/**
+ * Pixels of the layout viewport an on-screen keyboard covers.
+ *
+ * The mobile page leaves the browser's default `interactive-widget`, so the
+ * keyboard shrinks only the visual viewport: `100dvh` keeps its full height and
+ * the composer ends up underneath the keyboard. The gap between the layout and
+ * visual viewports is what has to be reserved at the bottom of the column.
+ *
+ * @param layoutHeight `window.innerHeight`, the layout viewport height.
+ * @param visualHeight `visualViewport.height`, the currently visible height.
+ * @param visualOffsetTop `visualViewport.offsetTop`, how far the visual viewport is scrolled.
+ * @returns Covered pixels, or zero when nothing is covered or a value is unusable.
+ */
+export function resolveKeyboardInset(
+  layoutHeight: number,
+  visualHeight: number,
+  visualOffsetTop: number,
+): number {
+  if (!Number.isFinite(layoutHeight) || !Number.isFinite(visualHeight) || !Number.isFinite(visualOffsetTop)) return 0
+  const covered = layoutHeight - visualHeight - visualOffsetTop
+  if (!Number.isFinite(covered) || covered <= KEYBOARD_INSET_MIN_PX) return 0
+  return Math.round(covered)
+}
+
 /** Resolved right-panel presentation for the dedicated responsive layout. */
 export interface MobileRightbarLayout {
   readonly docked: boolean
@@ -525,7 +558,7 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-shell{display:grid!important;grid-template-rows:minmax(0,1fr)!important;grid-template-columns:minmax(0,1fr)!important}
 @media(min-width:900px){.dshm-shell{grid-template-columns:auto minmax(0,1fr)!important}}
 }
-.dshm-main{grid-area:1/1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;margin-right:0;overflow:hidden;transition:margin-right var(--ds-transition-duration-slow,190ms) var(--ds-ease-in-out,ease)}
+.dshm-main{grid-area:1/1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;margin-right:0;overflow:hidden;padding-bottom:var(--dshm-keyboard-inset,0px);transition:margin-right var(--ds-transition-duration-slow,190ms) var(--ds-ease-in-out,ease)}
 .dshm-mainContent{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden}
 .dshm-shell[data-rightbar-docked=true] .dshm-main{margin-right:var(--dshm-rightbar-width)}
 .dshm-shell[data-rightbar-docked=true] .dshm-details{position:absolute;width:var(--dshm-rightbar-width);box-shadow:none;padding-top:0}
@@ -636,6 +669,32 @@ function MobileAppFrame(props: MobileRootProps & {
     window.addEventListener('resize', resize)
     return () => {
       window.removeEventListener('resize', resize)
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+    }
+  }, [])
+  // The mobile page does not ask the browser to resize its layout viewport, so
+  // the shell keeps its full height while the on-screen keyboard shrinks only the
+  // visual viewport and covers the composer. Track that difference here and
+  // reserve it at the bottom of the column.
+  const [keyboardInset, setKeyboardInset] = useState(0)
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (viewport === null || viewport === undefined) return
+    let frame: number | undefined
+    const apply = (): void => {
+      frame = undefined
+      setKeyboardInset(resolveKeyboardInset(window.innerHeight, viewport.height, viewport.offsetTop))
+    }
+    const schedule = (): void => {
+      if (frame !== undefined) return
+      frame = window.requestAnimationFrame(apply)
+    }
+    viewport.addEventListener('resize', schedule)
+    viewport.addEventListener('scroll', schedule)
+    apply()
+    return () => {
+      viewport.removeEventListener('resize', schedule)
+      viewport.removeEventListener('scroll', schedule)
       if (frame !== undefined) window.cancelAnimationFrame(frame)
     }
   }, [])
@@ -787,7 +846,7 @@ function MobileAppFrame(props: MobileRootProps & {
   return createElement('div', {
     className: 'dshm-shell', lang: language,
     'data-rightbar-docked': rightbarDocked,
-    style: { '--dshm-rightbar-width': `${rightbar.width}px` },
+    style: { '--dshm-rightbar-width': `${rightbar.width}px`, '--dshm-keyboard-inset': `${keyboardInset}px` },
   },
     createElement('main', {
       className: 'dshm-main',
