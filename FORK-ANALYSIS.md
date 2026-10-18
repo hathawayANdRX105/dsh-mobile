@@ -170,12 +170,36 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 
 ### 布局层
 
-| 现象 | 位置 | 原因 |
-|---|---|---|
-| 抽屉 / 详情面板跟手发滞 | `src/mobile-layout.ts` `.dshm-drawer` | `will-change:width` + `width` / `margin-right` 过渡——这两个属性不可合成，每帧都重排；`box-shadow: 18px 0 46px` 每帧重新光栅化 |
-| 移动访问面板底部被裁掉 / 缩在键盘下面 | `.dsh-mobile-control__panel` | 用 `calc(100vh - 140px)`，而同一份包里其它全高规则都用 `dvh`。`100vh` 在手机浏览器上不会随地址栏/软键盘收缩 |
-| 软键盘弹出时输入框被遮挡、布局跳变 | 全包 | 全插件**没有任何 `visualViewport` 处理**；唯一的视口监听是 `window.resize`，它在键盘动画期间每帧触发一次 `setViewportWidth` → 整个 `MobileAppFrame` 重渲染 |
-| 长会话里越滚越卡 | `src/mobile-layout.ts` | 见上文 `firstByClassSuffix` 的物化开销 |
+| 现象 | 位置 | 原因 | 状态 |
+|---|---|---|---|
+| 抽屉 / 详情面板跟手发滞 | `.dshm-drawer` | `width` / `margin-right` 过渡不可合成，每帧重排；`box-shadow: 18px 0 46px` 每帧重光栅化 | **实测不构成阻塞点，未改**（见下） |
+| 移动访问面板底部被裁掉 | `.dsh-mobile-control__panel` | `calc(100vh - 140px)`，而同包其它全高规则都用 `dvh` | ✅ 已改为 `vh` + `dvh` 回退对 |
+| 软键盘弹出时输入框被遮挡 | 全包 | 网关注入的 viewport meta 没有 `interactive-widget`，键盘只缩视觉视口、`100dvh` 不变；而全插件**没有任何 `visualViewport` 处理** | ✅ 已补（见下） |
+| 长会话里越滚越卡 | `src/mobile-layout.ts` | `firstByClassSuffix` 的物化开销 | ✅ 已改为短路遍历 |
+
+**关于抽屉过渡（为什么最终没改）**：实测打开抽屉的 600ms 窗口内 layout 仅 10.2ms、
+style 36.3ms，关闭 3.2ms / 20.3ms，且 `rafCallbacks: 1`——CSS 过渡不产生 JS 帧循环。
+再用运行时注入 CSS 做 A/B（去掉 `box-shadow` 过渡、只保留 `width`）：打开时 script
+从 7.6ms 降到 0.8ms，但 layout 反而从 6.3ms 升到 13.3ms，同一次运行的 idle 基线本身
+就在 28–43ms 之间波动。**结论：这项成本在噪声范围内。**
+
+之所以不改，还有一个结构性原因：抽屉关闭态是**可见的 56px 轨道**，且子元素宽度在
+56px ↔ 100% 之间切换，DSH 侧栏的折叠态布局依赖这个宽度。单纯换成 `transform`
+会变成"把 340px 布局裁掉左边"，而不是 DSH 的折叠轨道。要为 0 可测收益改动这个
+布局契约，不划算。
+
+**关于软键盘**：`resolveKeyboardInset(layoutHeight, visualHeight, visualOffsetTop)`
+取布局视口与视觉视口的差值，并在主列底部预留。它同时覆盖两种情况——浏览器若已经
+缩了布局视口（差值为 0）就不会重复预留；视觉视口被滚动时只预留其下方仍被遮挡的部分。
+小阈值用来滤掉浏览器工具栏与取整误差。
+
+端到端实测（把 `visualViewport.height` 覆写为 300px 键盘并派发 `resize`）：
+
+| | `--dshm-keyboard-inset` | 主列 padding | 输入框底部 |
+|---|---|---|---|
+| 初始 | 0px | 0px | 559 |
+| 键盘 300px | 300px | 300px | 409 |
+| 键盘收起 | 0px | 0px | 559 |
 
 ### 与你本机皮肤的冲突
 
@@ -245,12 +269,13 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 6. ~~压缩门禁改按媒体类型~~ ✅（实测收益有限，见上文更正）
 7. ~~CSS：`100vh`→`100dvh`；去掉 `will-change:width`~~ ✅ `fix(ui)`
 
-未做，仍值得做（按实测价值排序）：
+8. ~~加 `visualViewport` 键盘内缩~~ ✅ `feat(client)`，端到端实测见上。
 
-8. `width` / `margin-right` 过渡改 `transform`——会改变布局契约，需要单独一轮。
-   这是当前唯一还没处理的、每帧都在发生的布局成本。
-9. 加 `visualViewport` 键盘内缩变量（目前全插件没有任何 `visualViewport` 处理，
-   软键盘弹出时会遮挡输入框）。属于可用性问题，不是性能问题。
+未做：
+
+9. 抽屉的 `width` / `margin-right` 过渡改 `transform`——**实测后决定不做**：
+   打开/关闭的 layout 成本在 3–10ms，A/B 差异落在噪声里，而换成 `transform`
+   会破坏关闭态 56px 轨道的渲染。见「布局层」一节。
 10. 去掉 `rewriteMobileIndexWithBatch` 内部重复的 `parseMobileBootPlan`（每请求跑两遍）。
 11. 两个 2 秒轮询改 `fs.watch`。
 12. 两个缓存目前按 TTL 失效；改为按 boot `rev` 键控更准。
