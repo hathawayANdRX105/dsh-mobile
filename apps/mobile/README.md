@@ -79,6 +79,8 @@ The native soft-keyboard adapter uses plain Enter for a line break only with a v
 
 System bars, cutouts and keyboard occupancy are reserved once. WebView 151+ receives a minimum 64 MiB HTTP-cache quota for reusable versioned DSH resources; older engines retain their default quota. A Chromium-below-100 reminder is advisory, not a promise that every DSH API is supported on that engine.
 
+A successful App connection does not establish that its engine can execute the page. The DSH 0.2.1-rc.2 frontend contains syntax Chromium 92 cannot parse. If system WebView cannot be updated, use a browser confirmed to work without clearing pairings. See the [old-engine notes](../../README.en.md#app-or-mobile-browser) for the plugin's startup feedback and support limits.
+
 ### Voice
 
 DSH records audio through `getUserMedia` and sends it to the configured computer-side speech provider, not browser SpeechRecognition or the extension bridge. Android asks for microphone permission and accepts audio-only capture from the paired HTTPS Origin. Provider components, models and network access must work; granting recording permission does not verify transcription. Same-origin frontend plugins share that page permission.

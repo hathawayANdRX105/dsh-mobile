@@ -52,13 +52,66 @@ function legacyPage(options: { missingReason?: boolean } = {}): Context {
   const page = createContext({ AbortSignal: signal, AbortController: controller, DOMException, Event, EventTarget })
   runInContext('var intrinsicIterator = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())); ' +
     'for (var key of Reflect.ownKeys(intrinsicIterator)) { if (key !== Symbol.iterator) delete intrinsicIterator[key]; } ' +
-    'delete globalThis.Iterator; delete Promise.withResolvers;', page)
+    'delete globalThis.Iterator; delete Promise.withResolvers; ' +
+    'delete Object.hasOwn; delete Array.prototype.at; delete String.prototype.at; ' +
+    'delete Array.prototype.findLast; delete Array.prototype.findLastIndex; ' +
+    'delete Array.prototype.toSorted; delete Array.prototype.toReversed; delete globalThis.structuredClone;', page)
   return page
 }
 
 function load(page: Context): void {
   runInContext(bundle, page, { timeout: 5_000 })
 }
+
+describe('early published-client collection APIs', () => {
+  it('repairs the observed missing APIs before client code uses them', () => {
+    const page = legacyPage()
+    for (const expression of ['Object.hasOwn({}, "field")', '[1].at(-1)', '"text".at(-1)', '[1].findLast(Boolean)', '[1].findLastIndex(Boolean)', '[1].toSorted()', '[1].toReversed()', 'structuredClone({})']) {
+      expect(() => runInContext(expression, page)).toThrow()
+    }
+    load(page)
+    expect(runInContext('Object.hasOwn(Object.create({ inherited: true }), "inherited")', page)).toBe(false)
+    expect(runInContext('Object.hasOwn(Object.assign(Object.create(null), { field: 1 }), "field")', page)).toBe(true)
+    expect(runInContext('[[1, 2, 3].at(-1), [1].at(2), "text".at(-1), "text".at(9)]', page)).toEqual([3, undefined, 't', undefined])
+    expect(runInContext('var calls = []; var context = {}; var value = [1, , 3].findLast(function (value, index) { calls.push([value, index, this === context]); return index === 1; }, context); [value, calls]', page)).toEqual([undefined, [[3, 2, true], [undefined, 1, true]]])
+    expect(runInContext('Array.prototype.findLast.call({ 0: "old", 1: "new", length: 2 }, Boolean)', page)).toBe('new')
+    expect(runInContext('[[1, 2, 3].findLastIndex(value => value < 3), [1].findLastIndex(value => value > 1)]', page)).toEqual([1, -1])
+    expect(runInContext('var original = [3, 1, 2]; [original.toSorted((a, b) => a - b), original.toReversed(), original]', page)).toEqual([[1, 2, 3], [2, 1, 3], [3, 1, 2]])
+    expect(runInContext('var sparse = [, 1]; [sparse.toSorted(), sparse.toReversed(), 0 in sparse]', page)).toEqual([[1, undefined], [1, undefined], false])
+    for (const expression of ['Object.hasOwn(null, "field")', 'Array.prototype.at.call(null, 0)', '[1].findLast(null)', '[1].findLastIndex(null)', '[1].toSorted(null)', 'Array.prototype.toReversed.call(null)']) {
+      expect(() => runInContext(expression, page)).toThrow()
+    }
+    for (const expression of ['Object.getOwnPropertyDescriptor(Object, "hasOwn")', 'Object.getOwnPropertyDescriptor(Array.prototype, "at")', 'Object.getOwnPropertyDescriptor(String.prototype, "at")', 'Object.getOwnPropertyDescriptor(Array.prototype, "findLast")', 'Object.getOwnPropertyDescriptor(Array.prototype, "findLastIndex")', 'Object.getOwnPropertyDescriptor(Array.prototype, "toSorted")', 'Object.getOwnPropertyDescriptor(Array.prototype, "toReversed")']) {
+      expect(runInContext(`${expression}.enumerable`, page)).toBe(false)
+    }
+  })
+
+  it('preserves native implementations and remains stable after repeated loads', () => {
+    const page = createContext({})
+    const expressions = ['Object.hasOwn', 'Array.prototype.at', 'String.prototype.at', 'Array.prototype.findLast', 'Array.prototype.findLastIndex', 'Array.prototype.toSorted', 'Array.prototype.toReversed']
+    const native = expressions.map(expression => runInContext(expression, page))
+    load(page)
+    load(page)
+    expect(expressions.map(expression => runInContext(expression, page))).toEqual(native)
+  })
+
+  it('clones settings data without losing cycles, shared references or non-JSON values', () => {
+    const page = legacyPage()
+    load(page)
+    expect(runInContext(`
+      var shared = { enabled: true }, input = { left: shared, right: shared, settings: new Map([['date', new Date(0)]]), bytes: new Uint8Array([7, 9]) };
+      input.self = input;
+      var copy = structuredClone(input);
+      copy.left.enabled = false;
+      copy.bytes[0] = 1;
+      [copy !== input, copy.self === copy, copy.left === copy.right, input.left.enabled, copy.settings.get('date').getTime(), input.bytes[0], copy.bytes[0]];
+    `, page)).toEqual([true, true, true, true, 0, 7, 1])
+    expect(runInContext('try { structuredClone({ callback() {} }); } catch (error) { error.name; }', page)).toBe('DataCloneError')
+    const clone = runInContext('structuredClone', page)
+    load(page)
+    expect(runInContext('structuredClone', page)).toBe(clone)
+  })
+})
 
 describe('early WebView Iterator compatibility', () => {
   it('reproduces the missing global and fixes the actual standalone browser bundle without a DSH module loader', () => {

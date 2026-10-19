@@ -45,6 +45,8 @@ type BatchedBundleResponder = (
   response: ServerResponse,
 ) => boolean | Promise<boolean>
 
+type UpstreamCookieExchange = (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
+
 const cleanups: Array<() => Promise<void>> = []
 const TEST_FAILED_START_PORT = 38081
 /** Held by a UDP occupant so the gateway's broadcast discovery socket cannot bind it. */
@@ -52,6 +54,20 @@ const TEST_DISCOVERY_BUSY_PORT = 38099
 const COMPRESSIBLE_SCRIPT = 'globalThis.__compressionProbe = true;\n'.repeat(256)
 const UPSTREAM_LAUNCH_TOKEN = 'test-launch-token'
 const UPSTREAM_BROWSER_COOKIE = 'dsh-auth-test=v1.signed-cookie'
+
+/** Header classification used by the published dsh-web-startup-auth 0.1.12/0.1.13 minting hop. */
+function navigationAwareCookieExchange(incoming: IncomingMessage, response: ServerResponse): void {
+  const mode = incoming.headers['sec-fetch-mode']
+  const navigation = mode === undefined
+    ? incoming.headers.accept?.includes('text/html') === true
+    : typeof mode !== 'string' || mode === 'navigate' || mode === 'nested-navigate'
+  const cookie = `${UPSTREAM_BROWSER_COOKIE}; Max-Age=1800; Path=/; HttpOnly; SameSite=Strict`
+  response.writeHead(navigation ? 200 : 303, {
+    ...(navigation ? { 'content-type': 'text/html; charset=utf-8' } : { location: '/' }),
+    'set-cookie': cookie,
+  })
+  response.end(navigation ? '<!doctype html><meta http-equiv="refresh" content="0;url=/">' : undefined)
+}
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
@@ -229,7 +245,7 @@ function websocketBinaryFrame(payload: Buffer): Buffer {
 
 async function upstream(
   boot: 'legacy' | 'batched' | 'batched-relative' | 'batched-relative-invalid' | 'remote-settings' = 'legacy',
-  requireAuthentication = false,
+  requireAuthentication: boolean | UpstreamCookieExchange = false,
   upgradeBurst: Buffer = Buffer.alloc(0),
   upgradeHeaderLines: string[] = [],
   upgradeHeaderBytes?: number,
@@ -262,6 +278,10 @@ async function upstream(
       body: Buffer.concat(chunks).toString('utf8'),
     })
     if (requireAuthentication && incoming.url === `/?token=${UPSTREAM_LAUNCH_TOKEN}`) {
+      if (typeof requireAuthentication === 'function') {
+        await requireAuthentication(incoming, response)
+        return
+      }
       response.writeHead(303, {
         location: '/',
         'set-cookie': `${UPSTREAM_BROWSER_COOKIE}; Max-Age=1800; Path=/; HttpOnly; SameSite=Strict`,
@@ -1506,8 +1526,8 @@ describe('HTTP gateway', () => {
     expect(assetObservations).toEqual(['GET', 'GET'])
   })
 
-  it('keeps the DSH 0.1.2 browser-auth cookie inside the authenticated mobile gateway', async () => {
-    const inner = await upstream('batched', true)
+  it.each(['stock', 'navigation-aware'] as const)('keeps the %s upstream browser-auth cookie inside the authenticated mobile gateway', async mode => {
+    const inner = await upstream('batched', mode === 'stock' ? true : navigationAwareCookieExchange)
     const authenticatedUrl = `http://127.0.0.1:${String(inner.port)}/?token=${UPSTREAM_LAUNCH_TOKEN}`
     const instance = await gateway(inner.port, {}, undefined, authenticatedUrl)
     const paired = await pair(instance)
@@ -1528,11 +1548,104 @@ describe('HTTP gateway', () => {
     opened.socket.destroy()
 
     expect(inner.observations.filter(observation => observation.url?.includes('token=')).length).toBe(1)
+    expect(inner.observations.find(observation => observation.url.includes('token='))?.headers['sec-fetch-mode']).toBe('same-origin')
     for (const observed of inner.observations.filter(observation => !observation.url.includes('token='))) {
       expect(observed.headers.cookie).toBe(UPSTREAM_BROWSER_COOKIE)
     }
     expect(inner.upgradeObservations).toHaveLength(1)
     expect(inner.upgradeObservations[0]?.cookie).toBe(UPSTREAM_BROWSER_COOKIE)
+  })
+
+  it('distinguishes a navigation bounce from a non-navigation upstream cookie exchange', async () => {
+    const inner = await upstream('legacy', navigationAwareCookieExchange)
+    const path = `/?token=${UPSTREAM_LAUNCH_TOKEN}`
+    const headers = { host: `127.0.0.1:${String(inner.port)}`, accept: 'text/html' }
+    const navigation = await request(inner.port, path, { headers })
+    expect(navigation.status).toBe(200)
+    expect(navigation.body).toContain('http-equiv="refresh"')
+    expect(navigation.headers['set-cookie']?.[0]).toContain(UPSTREAM_BROWSER_COOKIE)
+    const exchange = await request(inner.port, path, { headers: { ...headers, 'sec-fetch-mode': 'same-origin' } })
+    expect(exchange.status).toBe(303)
+    expect(exchange.body).toBe('')
+    expect(exchange.headers['set-cookie']?.[0]).toContain(UPSTREAM_BROWSER_COOKIE)
+  })
+
+  it.each([
+    { label: 'an unexpected HTML 200 with a valid-looking cookie', status: 200, cookie: `${UPSTREAM_BROWSER_COOKIE}; Max-Age=1800` },
+    { label: 'a 303 without a cookie', status: 303, cookie: undefined },
+    { label: 'a malformed cookie pair', status: 303, cookie: 'not-a-cookie; Max-Age=1800' },
+    { label: 'a cookie without Max-Age', status: 303, cookie: UPSTREAM_BROWSER_COOKIE },
+    { label: 'an expired cookie', status: 303, cookie: `${UPSTREAM_BROWSER_COOKIE}; Max-Age=0` },
+    { label: 'an overflowing cookie expiry', status: 303, cookie: `${UPSTREAM_BROWSER_COOKIE}; Max-Age=999999999999999999999` },
+    { label: 'a 401 even when it supplies a cookie', status: 401, cookie: `${UPSTREAM_BROWSER_COOKIE}; Max-Age=1800` },
+    { label: 'a 403 even when it supplies a cookie', status: 403, cookie: `${UPSTREAM_BROWSER_COOKIE}; Max-Age=1800` },
+  ])('rejects upstream cookie exchange with $label', async ({ status, cookie }) => {
+    const inner = await upstream('legacy', (_incoming, response) => {
+      response.writeHead(status, { 'content-type': 'text/html', ...(cookie === undefined ? {} : { 'set-cookie': cookie }) })
+      response.end('<!doctype html><title>Authentication did not complete</title>')
+    })
+    const authenticatedUrl = `http://127.0.0.1:${String(inner.port)}/?token=${UPSTREAM_LAUNCH_TOKEN}`
+    const instance = await gateway(inner.port, {}, undefined, authenticatedUrl)
+    const paired = await pair(instance)
+    const result = await request(instance.address().port, '/api/exchange-probe', {
+      headers: { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` },
+    })
+    expect(result.status).toBe(502)
+    expect(JSON.parse(result.body)).toEqual({ error: 'upstream_unavailable' })
+    expect(result.headers['set-cookie']).toBeUndefined()
+    expect(inner.observations).toHaveLength(1)
+    expect(inner.observations[0]?.headers['sec-fetch-mode']).toBe('same-origin')
+  })
+
+  it('shares one held upstream cookie exchange across admitted requests and reuses the cookie', async () => {
+    let entered!: () => void
+    let release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    const inner = await upstream('legacy', async (incoming, response) => {
+      entered()
+      await held
+      navigationAwareCookieExchange(incoming, response)
+    })
+    const authenticatedUrl = `http://127.0.0.1:${String(inner.port)}/?token=${UPSTREAM_LAUNCH_TOKEN}`
+    const instance = await gateway(inner.port, {}, undefined, authenticatedUrl)
+    cleanups.push(async () => { release() })
+    const paired = await pair(instance)
+    const authorize = vi.spyOn(instance.access, 'authorizeSession')
+    cleanups.push(async () => { authorize.mockRestore() })
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const requests = Promise.all(['/api/first', '/api/second', '/api/third'].map(path => request(instance.address().port, path, { headers })))
+    void requests.catch(() => {})
+    await started
+    await vi.waitFor(() => { expect(authorize).toHaveBeenCalledTimes(3) })
+    expect(inner.observations).toHaveLength(1)
+    release()
+    expect((await requests).map(result => result.status)).toEqual([200, 200, 200])
+    const later = await request(instance.address().port, '/api/later', { headers })
+    expect(later.status).toBe(200)
+    expect(inner.observations.filter(observation => observation.url.includes('token='))).toHaveLength(1)
+    for (const observation of inner.observations.filter(observation => !observation.url.includes('token='))) {
+      expect(observation.headers.cookie).toBe(UPSTREAM_BROWSER_COOKIE)
+    }
+  })
+
+  it('retries a rejected upstream cookie exchange only when another caller explicitly requests access', async () => {
+    let exchanges = 0
+    const inner = await upstream('legacy', (incoming, response) => {
+      exchanges += 1
+      if (exchanges === 1) { response.writeHead(401); response.end(); return }
+      navigationAwareCookieExchange(incoming, response)
+    })
+    const authenticatedUrl = `http://127.0.0.1:${String(inner.port)}/?token=${UPSTREAM_LAUNCH_TOKEN}`
+    const instance = await gateway(inner.port, {}, undefined, authenticatedUrl)
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const failed = await request(instance.address().port, '/api/first', { headers })
+    expect(failed.status).toBe(502)
+    expect(exchanges).toBe(1)
+    const retried = await request(instance.address().port, '/api/retry', { headers })
+    expect(retried.status).toBe(200)
+    expect(exchanges).toBe(2)
   })
 
   it('keeps pairing and device management on a loopback Host-fenced route', async () => {

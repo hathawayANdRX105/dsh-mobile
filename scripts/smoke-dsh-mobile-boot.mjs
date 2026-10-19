@@ -23,7 +23,7 @@ const compressedWebSocket = process.argv.includes('--compressed-websocket')
 const blockedCompatibility = process.argv.includes('--negative-control-compat')
 const legacyWebView = blockedCompatibility || process.argv.includes('--legacy-webview')
 const compatibilityPath = '/mobile-access/compat.js'
-const compatibilityError = /AbortSignal\.any|throwIfAborted|AbortSignal getters|Promise\.withResolvers|Iterator.*(?:not defined|not a constructor|not a function)/u
+const compatibilityError = /AbortSignal\.any|throwIfAborted|AbortSignal getters|Promise\.withResolvers|Iterator.*(?:not defined|not a constructor|not a function)|Object\.hasOwn|(?:findLastIndex|findLast|toSorted|toReversed|structuredClone|\.at).*?(?:not defined|not a function)/u
 const excludedClientModules = process.env.DSH_BOOT_SMOKE_EXCLUDED_MODULES?.split(',').map(id => id.trim()).filter(Boolean) ?? []
 const startedAt = Date.now()
 let compatibilityFailureObserved = false
@@ -90,12 +90,28 @@ async function inspectBrowser(baseUrl, logs) {
         delete AbortSignal.prototype.throwIfAborted
         delete AbortSignal.prototype.reason
         delete globalThis.Iterator
+        delete Object.hasOwn
+        delete Array.prototype.at
+        delete String.prototype.at
+        delete Array.prototype.findLast
+        delete Array.prototype.findLastIndex
+        delete Array.prototype.toSorted
+        delete Array.prototype.toReversed
+        delete globalThis.structuredClone
         globalThis.__DSH_BOOT_SMOKE_MISSING_APIS__ = {
           promise: typeof Promise.withResolvers,
           abort: typeof AbortSignal.any,
           abortCheck: typeof AbortSignal.prototype.throwIfAborted,
           abortReason: typeof Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get,
           iterator: typeof globalThis.Iterator,
+          hasOwn: typeof Object.hasOwn,
+          arrayAt: typeof Array.prototype.at,
+          stringAt: typeof String.prototype.at,
+          findLast: typeof Array.prototype.findLast,
+          findLastIndex: typeof Array.prototype.findLastIndex,
+          toSorted: typeof Array.prototype.toSorted,
+          toReversed: typeof Array.prototype.toReversed,
+          clone: typeof globalThis.structuredClone,
         }
       })
     }
@@ -167,10 +183,18 @@ async function inspectBrowser(baseUrl, logs) {
           abortCheck: typeof AbortSignal.prototype.throwIfAborted,
           abortReason: typeof Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason')?.get,
           iterator: typeof globalThis.Iterator,
+          hasOwn: typeof Object.hasOwn,
+          arrayAt: typeof Array.prototype.at,
+          stringAt: typeof String.prototype.at,
+          findLast: typeof Array.prototype.findLast,
+          findLastIndex: typeof Array.prototype.findLastIndex,
+          toSorted: typeof Array.prototype.toSorted,
+          toReversed: typeof Array.prototype.toReversed,
+          clone: typeof globalThis.structuredClone,
         },
         scripts: Array.from(document.scripts, script => script.src === '' ? '<inline>' : new URL(script.src).pathname),
       }))
-      if (Object.values(features.missingAtInit ?? {}).length !== 5
+      if (Object.values(features.missingAtInit ?? {}).length !== 13
         || Object.values(features.missingAtInit).some(value => value !== 'undefined')
         || Object.values(features.restored).some(value => value !== 'function')) {
         throw new Error(`Legacy WebView compatibility did not restore the missing APIs: ${JSON.stringify(features)}`)

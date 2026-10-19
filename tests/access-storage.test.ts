@@ -183,14 +183,14 @@ describe('device and Session state', () => {
     expect(limiter.size).toBe(2)
   })
 
-  it('rate-limits failed pairing without closing the valid window', async () => {
+  it('rate-limits failed pairing without blocking the valid one-time secret', async () => {
     const access = controller(new MemoryDeviceStore(), () => 20_000, { maxPairingAttempts: 2 })
     await access.initialize()
     const opened = await access.openPairing()
     await expect(access.pair('source', 'wrong')).rejects.toMatchObject({ status: 401 })
     await expect(access.pair('source', 'wrong-again')).rejects.toMatchObject({ status: 401 })
-    await expect(access.pair('source', opened.token)).rejects.toMatchObject({ status: 429 })
-    const paired = await access.pair('different-source', opened.token)
+    await expect(access.pair('source', 'wrong-third')).rejects.toMatchObject({ status: 429 })
+    const paired = await access.pair('source', opened.token)
     expect(paired.deviceId).toMatch(/^[a-f\d]{32}$/)
   })
 

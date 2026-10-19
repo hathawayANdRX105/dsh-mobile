@@ -2,9 +2,40 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.13-fork.1 - 2026-10-20
+
+- Fork build based on upstream 0.6.13 with local performance optimizations. See [FORK-ANALYSIS.md](FORK-ANALYSIS.md) for the measured root causes.
+- Fix the 60fps self-sustaining `MutationObserver` loop in `native-mobile.ts`: the camera action's class and ARIA writes now resolve to one final value and assign it once, so a repeat sync stops writing instead of re-triggering the observer (measured 443ms of style recalculation per 2 seconds → 0).
+- Replace the session-subtree materialization in `firstByClassSuffix` with a short-circuiting scan, so a long session no longer allocates and walks several element arrays per frame.
+- Merge the duplicate full-document question-card queries and throttle the completion-notification observer, so a streamed token no longer costs two document-wide selector calls (measured 464 → 67 calls per 200 tokens, 40.2ms → 4.0ms of script time).
+- Cache the rewritten GUI document with an ETag and gzip it; the upstream index is no longer re-fetched and re-rewritten on every page load, and the client's conditional requests are answered instead of dropped.
+- Compress local assets and proxy responses by media type rather than a path allowlist, at zlib level 1 to keep the phone link as the constrained side.
+- Raise the upstream bundle-size probe cache from 30 seconds to 5 minutes, so the page-load path stops re-reading tens of megabytes of bundles every thirty seconds.
+- Reserve the on-screen keyboard height above the composer from `visualViewport`, so the input is not covered when the soft keyboard opens.
+- Size the mobile access panel against the dynamic viewport, so the bottom of the panel is no longer cut off.
+- Remove the non-compositable `width` transition from the drawer and the `margin-right` transition from the main column, and replace them with composited opacity keyframes.
+- CI workflow adjusted to allow a fork GitHub Release without an npm publish.
+
+## 0.6.13 - 2026-10-19
+
+- Distinguish inbound HTTP receive timeouts (408 `request_timeout`) and oversized request headers (431 `headers_too_large`) from other malformed HTTP requests (400 `bad_request`). Preserve the existing receive limits and single-attempt POST forwarding; do not automatically retry messages.
+- Add sampled HTTP rejection diagnostics that distinguish parser errors, invalid targets and authenticated upstream prompt rejections without recording request contents, raw packets, Cookies or arbitrary URLs. Connect diagnostic sinks for all Gateway factories, including own-origin and self-signed FRP entries.
+- Add real-page prompt-failure checks for restored text/images and visible errors. Separately reproduce a DSH 0.2.0-rc.2 and 0.2.1-rc.2 lifecycle defect: leaving a Session during a pending send cancels that request and discards its recovery state, including in pure stock profiles without Mobile installed. DSH source remains unchanged; this upstream defect and the exact cause of the reported #234 rejection are not claimed fixed. Thanks @Void-LifeStream for [#234](https://github.com/saya-ch/dsh-mobile/issues/234).
+- Distinguish HTTP receive timeouts and oversized request headers in the Gateway response and add bounded, privacy-preserving rejection diagnostics across all Gateway factories. Existing request limits, authentication checks and single-attempt POST forwarding remain unchanged; this release does not add automatic message retries.
+- Add a packed prompt-failure smoke covering text/image recovery and visible DSH errors on DSH 0.2.0-rc.2 and 0.2.1-rc.2. The optional navigation diagnostic records an upstream Session-lifecycle failure but is not a passing regression lane.
+- Keep DSH source and installed frontend artifacts read-only. The proposed iroh P2P channel in [#235](https://github.com/saya-ch/dsh-mobile/issues/235) is intentionally outside this repository and this release; it requires a separate host-side proof of concept.
+
+## 0.6.12 - 2026-10-18
+
+- Send explicit non-navigation Fetch Metadata during the Gateway's internal DSH cookie exchange. This avoids the HTML navigation bounce produced by community authentication plugins without accepting arbitrary HTTP 200 pages, following redirects, or forwarding the upstream Cookie to the phone. Thanks @jamorzzz for [#230](https://github.com/saya-ch/dsh-mobile/issues/230).
+- Separate invalid pairing/renewal/probe attempts from valid credentials behind a shared proxy. Invalid requests retain direct-peer limits; valid pairing secrets receive bounded admission, while renewal and probe budgets belong to the authenticated device. Keep operations accounted for until they settle even when the caller disconnects, and recheck credentials inside serialized writes. Forwarded IP headers remain untrusted. Thanks @Akiyuki1130 for [#231](https://github.com/saya-ch/dsh-mobile/issues/231).
+- Extend the pre-boot compatibility script with identified missing array, string, object and structured-clone APIs. Add Chinese, English and Italian startup-failure feedback with explicit reload/wait actions when DSH has not rendered; mounted DSH and its own loader are not replaced, and no automatic reload is added.
+- Identify unsupported class static-block syntax in DSH 0.2.1-rc.2's published frontend: Chromium 92 cannot parse that bundle. API shims and the existing old-engine advisory do not establish support for that engine. The feedback script itself targets Chromium 92; it does not transpile DSH. Thanks @yunyunlyk for the detailed engine and entry-mode comparison in [#232](https://github.com/saya-ch/dsh-mobile/issues/232).
+- Add DSH 0.2.1-rc.2 to the packed-browser CI matrix and distinguish plugin-update SSE from conversation transport in troubleshooting. Android App 0.6.5 (build 81) remains independently published; no native change or new APK is part of this release.
+
 ## 0.6.11-fork.1 - 2026-10-18
 
-- Fork build based on upstream 0.6.11 with local performance optimizations.
+- Fork build based on upstream 0.6.11 with local performance optimizations. Superseded by 0.6.13-fork.1, which carries the same work on a newer upstream.
 - Fix 60fps self-sustaining MutationObserver loop in `native-mobile.ts` by making camera action class/aria writes idempotent (single assignment per frame).
 - Throttle completion notification observer and merge duplicate querySelector calls for question cards (464 → 67 calls per 200 tokens).
 - Add index document cache with ETag validation and gzip compression; compress local assets (compat.js) and API JSON responses.

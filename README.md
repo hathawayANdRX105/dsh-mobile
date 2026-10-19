@@ -26,13 +26,13 @@
   <a href="#兼容性">兼容性</a> ·
   <a href="docs/README.md">文档</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11">更新记录</a> ·
+  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.11-fork.1**。基于上游 0.6.11 的 fork 优化构建：修复 60fps 自持循环与传输层延迟，移除抽屉/右侧栏的不可合成属性过渡。Android App **0.6.5** 独立更新取消连接、超时与加载等待。[更新与下载](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.11-fork.1) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.13-fork.1**。基于上游 0.6.13 的性能优化分支：修复 60fps 自持观察器循环与会话子树物化开销，合并并节流每 token 的全文档查询，为改写后的页面增加缓存、ETag 与压缩，移除不可合成的抽屉宽度过渡，并补齐软键盘视口内缩。Android App **0.6.5** 保持不变，无需同步升级。[更新与下载](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -336,9 +336,11 @@ excludedClientModules:
 
 Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏览器访问的是同一页面。开发者可在已认证移动地址后追加 `?frontend=stock` 诊断启动与布局行为；该入口跳过专用移动启动改写和模块选择，但仍可能加载客户端移动适配及已认证定制，并非不含插件的对照页。部分 API 操作可能被拒绝，不能代替正常移动入口。详见[皮肤与移动布局](docs/SKIN_COMPATIBILITY.md)。
 
-0.5.5 的专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers 的 WebView 提供随插件打包的 core-js 兼容实现，避免启动时出现 `Iterator is not defined`。兼容层按能力检测保留或修正原生 helper，不依赖 CDN，也不会放宽 CSP；桌面页面与 `?frontend=stock` 页面不会加载这个网关脚本。
+专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers、`Promise.withResolvers` 和 `AbortSignal.any` 的 WebView 提供随插件打包的兼容实现。兼容层按能力检测保留或修正原生实现，不依赖 CDN，也不会放宽 CSP；桌面页面与 `?frontend=stock` 页面不会加载这个网关脚本。Android App 还会在支持 document-start 注入的 WebView 中，为配对的精确 Origin 提前补齐 `Promise.withResolvers`。
 
-0.6.0 在同一个启动前脚本中增加 `Promise.withResolvers` 与 `AbortSignal.any` 的能力检测和兼容实现。Android App 还会在支持 document-start 注入的 WebView 中，为配对的精确 Origin 提前补齐 `Promise.withResolvers`。这只覆盖已识别的缺失 API，不是所有旧内核的支持承诺；前端仍以 ES2022 为构建目标，尚未在报告中的华为 WebView 114 真机上验收。出现其他兼容错误时，若设备允许更新，请优先更新 Android System WebView / Chrome；若系统组件不可更新，请保留完整错误、内核版本与进入方式供排查。
+**旧内核限制**：API 兼容实现不能修复内核无法解析的 JavaScript 语法。DSH **0.2.1-rc.2** 的正式前端包含 class static blocks，Chromium **92** 无法解析；该语法从 Chrome 94 默认可用，但这不代表 94 已通过整个 DSH 的兼容验收。[V8 说明](https://v8.dev/blog/v8-release-94)。App 的“内核低于 100”提醒只是建议，点击继续不代表当前 DSH 可以运行。若系统 WebView 无法更新，可使用已确认正常的手机浏览器访问电脑端提供的移动地址，无需清除原有 App 配对。
+
+插件 **0.6.13** 在保留 0.6.12 兼容层和启动反馈的基础上，区分网关接收超时与请求头过大，并增加图文发送失败的打包回归。它不转译 DSH、不修改 DSH 源码，也不自动重发消息；华为 Chromium 92 的实际 App 尚未完成验收。反馈问题时请提供 DSH／插件／App 与 WebView 版本、进入方式和脱敏后的首个控制台错误，不要发送令牌或完整配对地址。
 
 > **社区客户端（非官方）**：[微信小程序客户端](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > 原生微信小程序实现，复用「移动访问」的配对与 Remote 流协议（需 dsh-mobile ≥ 0.3.8）。
@@ -406,6 +408,8 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | DSH Mobile 插件 | 已验证的 DeepSeek Harness 版本与范围 |
 | --- | --- |
 | `0.6.11` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.2`、`0.2.1-alpha.3` 的隔离打包浏览器 CI；`0.2.0-rc.2` 与 `0.2.1-alpha.3` 另通过真实历史分页、滚动位置保持和手动加载检查。浏览器检查不代表所有手机内核、第三方插件或公网线路已验收 |
+| `0.6.12` | `0.2.1-rc.2` 的打包安装、移动启动、缺失 API 模拟、工作区实时读取、保留页面的断线恢复及移动设置；`0.2.0-rc.2` 搭配实际社区认证插件 `dsh-web-startup-auth@0.1.12` 的认证与资源回归。未将 Chromium 92 真机、任意认证插件或公网线路写成已验收 |
+| `0.6.13` | `0.2.0-rc.2`、`0.2.1-rc.2` 的打包图文 HTTP 400 恢复、Host 拒绝护栏与错误提示回归；网关 408/431 分类、三类受限诊断及四种 Gateway 工厂接线通过本地测试。DSH 源码、iroh P2P 和 Android 原生代码不在本版范围 |
 
 <details>
 <summary>历史版本验证记录</summary>

@@ -1,8 +1,11 @@
 # Fork 分析：dsh-mobile 0.6.10 卡顿与 UI 样式问题
 
 分析对象：`~/.dsh/profiles/web/node_modules/dsh-mobile`（已安装版本 0.6.10）。
-源码定位基于上游仓库 `saya-ch/dsh-mobile`（Apache-2.0），本地检出为 `~/projects/dsh-mobile`（HEAD = 0.6.11）。
+源码定位基于上游仓库 `saya-ch/dsh-mobile`（Apache-2.0），本地检出为 `~/projects/dsh-mobile`。
 `~/projects/dsh-mobile-fork` 保存了 0.6.10 发布包（仅 `lib/` 编译产物）作为对照基线。
+
+修复已发布为 fork 版本 **0.6.13-fork.1**（基于上游 0.6.13）。
+下载：<https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1>。
 
 ## 一、工作原理
 
@@ -281,7 +284,7 @@ function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | und
 
 ## 五、建议的 fork 改造顺序
 
-已在 `fix/transport-and-jank` 分支完成的（见该分支提交）：
+已在 fork 发布分支（`0.6.13-fork.1`，基于上游 0.6.13）完成的：
 
 1. ~~修 P0 死循环~~ ✅ `perf(client)` 两次：先加幂等判断（不够），再改成"先算后赋一次"。
    实测 443ms 样式重算 / 2 秒 → 0。

@@ -12,6 +12,8 @@ For persisted provider switches, a failed state write must leave a confirmed run
 
 Preserve precise Origin checks, HTTPS trust, LAN/private CA pinning, device token handling, CSRF and targeted revocation. Never fix a connection by ignoring certificate errors globally, sending credentials to a discovered arbitrary address, exposing the DSH loopback port publicly or weakening third-party WS policy.
 
+A proxy's direct TCP peer can be shared by every phone. Keep anonymous failure limits separate from valid-secret admission and authenticated-device budgets; never repair shared-budget starvation by trusting arbitrary forwarded-IP headers. Validate cheaply before entering a mutation queue, then recheck expiry/revocation inside it. Pending operations remain accounted for after caller disconnect until the physical work settles. [Authentication admission tests](../../../../tests/auth-rate-limits-gateway.test.ts) cover shared peers, bounded work and device rotation.
+
 Distinguish network unavailability, changed address, expired credentials, authentication failure and computer-side revocation. A timeout is not evidence that the computer removed the device. Verify the active discovery identity before merging a changed cpolar Origin into a saved computer. App credentials stay Keystore-protected; display names and addresses must not expose Tokens.
 
 An absolute state-file path is not a computer identity: independent computers commonly use the same path. Automatically identified entries without a pairing CA use the persisted random installation ID; explicit operator IDs and LAN/self-signed FRP CA fingerprints retain their existing meaning. Copying the entire state also copies that identity. Read [the identity resolver](../../../../src/gateway-identity.ts) and [plugin composition](../../../../src/plugin.ts), not only the config parser's legacy fallback.
@@ -44,6 +46,8 @@ Independent pnpm profile paths can still share hardlinked package files. Install
 
 An iframe document also requests `Accept: text/html`; that header alone does not identify the DSH shell. Keep Mobile boot rewriting aligned with DSH's actual frontend entry points and boot manifest, and forward community preview/error documents to their original route without replacing them with the homepage. Include the browser's iframe headers, response body and upstream target in `tests/gateway.test.ts`; framing-policy headers alone do not establish that the preview was served.
 
+An upstream auth plugin can classify HTML Accept as browser navigation and return a successful bounce document rather than the expected cookie-exchange redirect. Mark the Gateway's internal exchange as non-navigation, while preserving the configured upstream Origin, redirect-status and Cookie validation. Do not accept arbitrary HTML 200 responses, follow redirects or forward the upstream Cookie to a phone. [The pinned community-auth smoke](../../../../scripts/smoke-upstream-auth.mjs) distinguishes real navigation and exchange responses before checking authenticated boot and Workspace traffic.
+
 For cellular/public-route tests, use the phone's real network. Mark USB reverse, loopback routing, local reverse proxies and simulated TLS as isolated evidence. If temporarily switching providers is authorized, record and restore the selected provider; do not silently abandon a working tunnel.
 
 For LAN failures, distinguish wrong interface/address, listener binding, firewall policy and network isolation with checks from both ends. Sharing a Wi-Fi name does not guarantee routing between clients or campus subnets. The plugin cannot bypass a router's client isolation; do not prescribe globally disabling the firewall or exposing all interfaces as a universal fix. Use the existing diagnostics and an appropriate remote route when the network cannot provide LAN reachability.
@@ -52,6 +56,8 @@ For self-hosted FRP or a reverse proxy, follow the owning provider guide: the lo
 
 Preserve revision-aware asset caching, compression and bounded history pagination. Do not replay API writes or model operations while retrying transient static requests. Long API operations must not be cut off by an ordinary static-transport timeout. Automatic recovery should renew trust and restore transport while retaining the existing WebView/document when possible, not repeatedly reload the homepage and discard draft/scroll/menu state.
 
+An optimistic message bubble and cleared draft can appear before a prompt request or Host acknowledgement. Trace the actual published DSH send consumer, request and acknowledgement before diagnosing lost delivery; a module-update SSE is not the conversation stream. Keep transport rejection, Host acceptance and model execution distinct, and never add automatic write replay from a screenshot or access-log gap alone.
+
 Entity tags use HTTP quoted syntax and conditional GET/HEAD weak comparison, including lists and `*`. Authenticate and check the resource before returning 304. When gzip changes representation bytes, do not retain an identity strong tag, length or range metadata; preserve correct encoding negotiation on both 200 and 304. Missing upstream validators do not justify inventing a content hash from an arbitrary URL or buffering an unbounded body.
 
 For Windows permission failures, preserve ACL-before-use and expose only the operation stage, wait duration and safe machine fields. Cordis renders Error causes recursively; retaining a raw subprocess cause can reveal SID arguments, private paths or command output despite a redacted outer message. Diagnostic improvements are not evidence that startup contention or a loader dependency delay is fixed.
@@ -59,6 +65,8 @@ For Windows permission failures, preserve ACL-before-use and expose only the ope
 Attach error handling to both WebSocket peers. Reserved close codes such as 1005, 1006 and 1015 describe local conditions and must not be transmitted as close frames. Test invalid peer input and teardown without allowing an unhandled socket error to terminate DSH. Third-party terminal/realtime routes require exact-path approval; do not replace that with an unrestricted WS proxy.
 
 ## Mobile presentation
+
+Missing APIs and unsupported JavaScript syntax require different handling. Inspect the actual published frontend: an API shim cannot repair a parser failure in DSH's bundle. Keep the early diagnostic script parseable on its intended old engine without claiming that engine can run the application. Fixed error categories avoid reflecting sensitive messages/URLs; preserve CSP nonces through the DOM nonce property, leave mounted DSH and its loader alone, and offer explicit recovery without automatic reload. [Boot-feedback smoke](../../../../scripts/smoke-mobile-boot-feedback.mjs) checks these controls, not a physical old WebView or Android Activity.
 
 Reuse DSH's existing frontend semantics and theme tokens. Keep plugin-owned selectors narrow, preserve desktop behavior and support light/dark modes. The Android top native toolbar stays hidden; computer switching belongs in the DSH web page's General settings, not in the native device-list settings where it is redundant.
 

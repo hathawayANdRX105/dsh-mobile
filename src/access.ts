@@ -117,6 +117,13 @@ export class BoundedRateLimiter {
     return true
   }
 
+  /** Discard entries that no longer identify an eligible key in a trusted, finite key set. */
+  retainKeys(eligible: ReadonlySet<string>): void {
+    for (const key of this.buckets.keys()) {
+      if (!eligible.has(key)) this.buckets.delete(key)
+    }
+  }
+
   /** Current table size, exposed for bounded-state assertions. */
   get size(): number {
     return this.buckets.size
@@ -164,6 +171,7 @@ export class AccessController {
   private readonly pairLimiter: BoundedRateLimiter
   private devices: StoredDevice[] = []
   private pairingWindow: PairingWindow | undefined
+  private pairPending = false
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly sessionEndedListeners = new Set<(authorization: SessionAuthorization, reason: SessionEndReason) => void>()
   private mutation: Promise<void> = Promise.resolve()
@@ -280,43 +288,62 @@ export class AccessController {
     })
   }
 
+  /** Limit invalid guesses by peer without letting them consume a valid one-time secret's admission. */
+  private rejectPairingAttempt(sourceKey: string, now: number): never {
+    if (!this.pairLimiter.take(sourceKey, now)) throw new AccessError(429, 'rate_limited')
+    throw new AccessError(401, 'authentication_failed')
+  }
+
   /** Consume the pairing window exactly once and persist only the device-token digest. */
   async pair(sourceKey: string, token: string, label?: string): Promise<PairingResult> {
     this.requireInitialized()
-    const now = this.now()
-    if (!this.pairLimiter.take(sourceKey, now)) throw new AccessError(429, 'rate_limited')
-    if (token.length > 512) throw new AccessError(401, 'authentication_failed')
-    return this.exclusive(async () => {
-      const window = this.pairingWindow
-      if (window === undefined || window.expiresAt <= now || !matchesDigest(token, window.digest)) {
-        if (window !== undefined && window.expiresAt <= now) this.pairingWindow = undefined
-        throw new AccessError(401, 'authentication_failed')
-      }
-      this.pairingWindow = undefined
-      const active = this.devices.filter(device => device.revokedAt === undefined && device.expiresAt > now)
-      if (active.length >= this.options.maxDevices) throw new AccessError(409, 'device_limit')
+    const initialNow = this.now()
+    const initialWindow = this.pairingWindow
+    // Reject unknown guesses before the serialized mutation queue. A candidate
+    // is checked again inside it because another pairing or opening can replace
+    // the one-time window while this request waits.
+    if (token.length > 512 || initialWindow === undefined || initialWindow.expiresAt <= initialNow
+      || !matchesDigest(token, initialWindow.digest)) {
+      this.rejectPairingAttempt(sourceKey, initialNow)
+    }
+    if (this.pairPending) throw new AccessError(429, 'rate_limited')
+    this.pairPending = true
+    try {
+      return await this.exclusive(async () => {
+        const now = this.now()
+        const window = this.pairingWindow
+        if (window === undefined || window.expiresAt <= now || !matchesDigest(token, window.digest)) {
+          if (window !== undefined && window.expiresAt <= now) this.pairingWindow = undefined
+          this.rejectPairingAttempt(sourceKey, now)
+        }
+        this.pairingWindow = undefined
+        const active = this.devices.filter(device => device.revokedAt === undefined && device.expiresAt > now)
+        if (active.length >= this.options.maxDevices) throw new AccessError(409, 'device_limit')
 
-      const deviceToken = opaqueToken()
-      const device: StoredDevice = Object.freeze({
-        id: randomBytes(16).toString('hex'),
-        label: normalizeLabel(label),
-        tokenDigest: digestHex(deviceToken),
-        createdAt: now,
-        expiresAt: now + this.options.deviceTtlMs,
-        lastSeenAt: now,
-        ...(this.options.pairingInstanceId === undefined ? {} : { nativeInstanceId: this.options.pairingInstanceId }),
+        const deviceToken = opaqueToken()
+        const device: StoredDevice = Object.freeze({
+          id: randomBytes(16).toString('hex'),
+          label: normalizeLabel(label),
+          tokenDigest: digestHex(deviceToken),
+          createdAt: now,
+          expiresAt: now + this.options.deviceTtlMs,
+          lastSeenAt: now,
+          ...(this.options.pairingInstanceId === undefined ? {} : { nativeInstanceId: this.options.pairingInstanceId }),
+        })
+        const retained = this.devices.filter(candidate => candidate.revokedAt === undefined && candidate.expiresAt > now)
+        const next = [...retained, device]
+        await this.store.save(this.snapshot(next))
+        this.devices = next
+        const session = this.createSession(device, now)
+        return Object.freeze({
+          ...session,
+          deviceToken,
+          deviceExpiresAt: device.expiresAt,
+        })
       })
-      const retained = this.devices.filter(candidate => candidate.revokedAt === undefined && candidate.expiresAt > now)
-      const next = [...retained, device]
-      await this.store.save(this.snapshot(next))
-      this.devices = next
-      const session = this.createSession(device, now)
-      return Object.freeze({
-        ...session,
-        deviceToken,
-        deviceExpiresAt: device.expiresAt,
-      })
-    })
+    } finally {
+      this.pairPending = false
+    }
   }
 
   /** Exchange a valid persistent device credential for a new short Session. */

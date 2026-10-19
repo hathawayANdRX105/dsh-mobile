@@ -6,13 +6,14 @@ export const mobileCompatibilityBuild = {
   outDir: 'lib',
   format: ['iife'],
   platform: 'browser',
-  target: 'es2022',
+  target: 'chrome92',
   dts: false,
   sourcemap: true,
   clean: false,
   minify: true,
   deps: { alwaysBundle: ['core-js'], onlyBundle: ['core-js'] },
-  outputOptions: { entryFileNames: 'mobile-compat.js' },
+  // Prototype polyfills must retain strict `this` semantics after CJS bundling.
+  outputOptions: { banner: '"use strict";', entryFileNames: 'mobile-compat.js' },
 } satisfies UserConfig
 
 export default defineConfig([{

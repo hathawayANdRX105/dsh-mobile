@@ -37,6 +37,8 @@ Bind to an explicit loopback or RFC1918 IPv4 already assigned to the DSH compute
 
 CIDRs match the proxy's **direct TCP peer**, not the phone or `X-Forwarded-For` / `X-Real-IP` / `Forwarded`. Docker or NAT may change that peer. Prefer the actual single-host /32, not an entire subnet. Up to 16 canonical private/loopback CIDRs are accepted, separated by spaces or commas; explicit private proxy sources are required for a LAN bind.
 
+Phones behind a proxy may share that direct peer. From plugin 0.6.12, invalid credentials still share its failure budget, but anonymous failures cannot exhaust a valid one-time pairing secret's admission. Authenticated renewals and probes have per-device limits and bounded pending work. Adding or trusting forwarded-IP headers is unnecessary. For `429 rate_limited` on older versions, update the plugin while retaining pairings; do not widen source CIDRs or expose the ordinary DSH listener.
+
 Select **Save and start backend**. An active backend reloads its settings. The panel separates the public HTTPS origin from the actual listening HTTP backend; saved settings remain visible after stopping.
 
 ## Proxy requirements, including Lucky

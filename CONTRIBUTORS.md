@@ -1,8 +1,14 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-17 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-18 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-17. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-18. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+
+## 0.6.12 问题定位 / Issue findings for 0.6.12
+
+感谢 [@jamorzzz](https://github.com/jamorzzz) 在 [#230](https://github.com/saya-ch/dsh-mobile/issues/230) 提供社区认证插件的导航响应与网关握手分析，[@Akiyuki1130](https://github.com/Akiyuki1130) 在 [#231](https://github.com/saya-ch/dsh-mobile/issues/231) 复现共享代理下的匿名限流耗尽，以及 [@yunyunlyk](https://github.com/yunyunlyk) 在 [#232](https://github.com/saya-ch/dsh-mobile/issues/232) 提供具体华为内核版本与 App／浏览器对照。这些报告分别促成认证握手、凭据限流和旧内核启动反馈改进；未将报告者真机写成已完成修复验收。
+
+Thanks [@jamorzzz](https://github.com/jamorzzz) for the community-auth navigation and Gateway exchange analysis in [#230](https://github.com/saya-ch/dsh-mobile/issues/230), [@Akiyuki1130](https://github.com/Akiyuki1130) for reproducing anonymous rate-limit exhaustion behind a shared proxy in [#231](https://github.com/saya-ch/dsh-mobile/issues/231), and [@yunyunlyk](https://github.com/yunyunlyk) for the exact Huawei engine version and App/browser comparison in [#232](https://github.com/saya-ch/dsh-mobile/issues/232). These reports informed authentication, credential-admission and old-engine startup feedback improvements; they are not recorded as completed acceptance on the reporters' devices.
 
 ## 0.6.11 代码贡献 / Code contributions in 0.6.11
 
@@ -130,7 +136,7 @@ Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#
 | [@sortjiajun](https://github.com/sortjiajun) | [#90](https://github.com/saya-ch/dsh-mobile/issues/90) |
 | [@StrawberryAO](https://github.com/StrawberryAO) | [#39](https://github.com/saya-ch/dsh-mobile/issues/39) |
 | [@Surpass567](https://github.com/Surpass567) | [#80](https://github.com/saya-ch/dsh-mobile/issues/80), [#81](https://github.com/saya-ch/dsh-mobile/issues/81) |
-| [@Void-LifeStream](https://github.com/Void-LifeStream) | [#205](https://github.com/saya-ch/dsh-mobile/issues/205), [#219](https://github.com/saya-ch/dsh-mobile/issues/219), [#225](https://github.com/saya-ch/dsh-mobile/issues/225) |
+| [@Void-LifeStream](https://github.com/Void-LifeStream) | [#205](https://github.com/saya-ch/dsh-mobile/issues/205), [#219](https://github.com/saya-ch/dsh-mobile/issues/219), [#225](https://github.com/saya-ch/dsh-mobile/issues/225), [#234](https://github.com/saya-ch/dsh-mobile/issues/234) |
 | [@WalkerJay666](https://github.com/WalkerJay666) | [#201](https://github.com/saya-ch/dsh-mobile/issues/201) |
 | [@up-and-down-0618](https://github.com/up-and-down-0618) | [#115](https://github.com/saya-ch/dsh-mobile/issues/115) |
 | [@taki-ohh](https://github.com/taki-ohh) | [#19](https://github.com/saya-ch/dsh-mobile/issues/19) |

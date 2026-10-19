@@ -26,13 +26,13 @@
   <a href="#compatibility">Compatibility</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11">Release notes</a> ·
+  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.11-fork.1**. Fork-optimized build based on upstream 0.6.11: fixes 60fps self-sustaining loop and transport latency; removes non-compositable drawer/rightbar transitions. Android app **0.6.5** independently improves connection cancellation, timeouts and loading presentation. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.11-fork.1) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.13-fork.1**. Performance-optimized fork of upstream 0.6.13: fixes the 60fps self-sustaining observer loop and the session-subtree materialization, merges and throttles the per-token document-wide queries, adds a cached, ETag-validated and compressed GUI document, removes the non-compositable drawer width transition, and reserves the on-screen keyboard height. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -336,9 +336,11 @@ Selection priority is device choice → computer defaults → plugin configurati
 
 The Android app is a thin Kotlin WebView shell and contains no frontend copy; mobile browsers load the same page. Developers can append `?frontend=stock` to an authenticated mobile URL to diagnose boot and layout behavior. This entry skips dedicated mobile boot rewriting and module selection, but installed client adaptation and authenticated customizations may still apply. It is not a plugin-free control; some API operations may be rejected, so it does not replace normal mobile access. See [skins and mobile layout](docs/SKIN_COMPATIBILITY.en.md).
 
-In 0.5.5, the dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script.
+The dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled compatibility layer supplies missing `Iterator` / Iterator helpers, `Promise.withResolvers` and `AbortSignal.any`. It uses feature detection to preserve or repair native implementations, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script. On WebViews that support document-start injection, the Android App also supplies `Promise.withResolvers` early for the paired exact Origin.
 
-Version 0.6.0 adds feature-detected `Promise.withResolvers` and `AbortSignal.any` implementations to the same pre-boot script. On WebViews that support document-start injection, the Android app also supplies `Promise.withResolvers` early for the paired exact Origin. This covers identified missing APIs, not every old engine; the frontend still targets ES2022, and this version has not been verified on the reported physical Huawei WebView 114 device. If other compatibility errors remain and the device allows updates, update Android System WebView / Chrome first. If the system component cannot be updated, retain the full error, engine version, and entry mode for diagnosis.
+**Old-engine limits**: API shims cannot repair JavaScript syntax an engine cannot parse. The published **DSH 0.2.1-rc.2** frontend contains class static blocks, which Chromium **92** cannot parse. This syntax became enabled by default in Chrome 94, but that does not establish full DSH compatibility on 94. [V8 announcement](https://v8.dev/blog/v8-release-94). The App's below-100 advisory is not a compatibility guarantee; choosing Continue does not make the current DSH runnable. If system WebView cannot be updated, use a phone browser already confirmed to work with the computer's mobile address, without clearing existing App pairings.
+
+**Plugin 0.6.13** retains the 0.6.12 compatibility layer and startup feedback, distinguishes Gateway receive timeouts from oversized headers, and adds packed text/image prompt-failure checks. It does not transpile or modify DSH, and it does not automatically replay messages; acceptance on the physical Huawei Chromium 92 App remains unverified. Reports should include DSH/plugin/App and WebView versions, entry mode and the first redacted console error, never tokens or complete pairing URLs.
 
 > **Community client (unofficial)**: [WeChat Mini-Program client](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > A native WeChat Mini-Program that reuses the Mobile Access pairing and Remote stream protocol (requires dsh-mobile ≥ 0.3.8).
@@ -405,6 +407,8 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
 | `0.6.11` | Isolated packed-browser CI on `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-alpha.2` and `0.2.1-alpha.3`; additional real history-pagination, viewport-preservation and manual-loading checks on `0.2.0-rc.2` and `0.2.1-alpha.3`. Browser checks do not establish acceptance of every phone engine, third-party plugin or public route |
+| `0.6.12` | Packed installation, mobile boot, missing-API simulation, Workspace streaming, retained-page transport recovery and mobile settings on `0.2.1-rc.2`; authentication/resource regression with the actual community `dsh-web-startup-auth@0.1.12` on `0.2.0-rc.2`. This does not establish physical Chromium 92, arbitrary auth-plugin or public-route acceptance |
+| `0.6.13` | Packed text/image HTTP 400 recovery, Host refusal guard and error-feedback checks on `0.2.0-rc.2` and `0.2.1-rc.2`; Gateway 408/431 classification, bounded diagnostics and four Gateway factory wiring passed local tests. DSH source, iroh P2P and Android native code are outside this release |
 
 <details>
 <summary>Historical version checks</summary>

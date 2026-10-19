@@ -18,14 +18,29 @@ try {
       delete Promise.withResolvers
       delete AbortSignal.any
       delete globalThis.Iterator
-      if (mode === 'bundle') delete AbortSignal.prototype.throwIfAborted
+      if (mode === 'bundle') {
+        delete AbortSignal.prototype.throwIfAborted
+        delete Object.hasOwn
+        delete Array.prototype.at
+        delete String.prototype.at
+        delete Array.prototype.findLast
+        delete Array.prototype.findLastIndex
+        delete Array.prototype.toSorted
+        delete Array.prototype.toReversed
+        delete globalThis.structuredClone
+        globalThis.clientApisMissingAtStart = [
+          typeof Object.hasOwn, typeof Array.prototype.at, typeof String.prototype.at,
+          typeof Array.prototype.findLast, typeof Array.prototype.findLastIndex,
+          typeof Array.prototype.toSorted, typeof Array.prototype.toReversed, typeof structuredClone,
+        ]
+      }
       globalThis.compatMissingAtStart = [typeof Promise.withResolvers, typeof AbortSignal.any, typeof Iterator]
     }, mode)
     await page.route('https://compat.test/**', route => {
       const pathname = new URL(route.request().url()).pathname
       return pathname === '/compat.js'
         ? route.fulfill({ contentType: 'text/javascript', body: mode === 'bundle' ? bundle : shim })
-        : route.fulfill({ contentType: 'text/html', body: '<!doctype html><script src="/compat.js"></script><script>new AbortController().signal.throwIfAborted(); globalThis.bootReady = Promise.withResolvers(); bootReady.resolve("ready");</script>' })
+        : route.fulfill({ contentType: 'text/html', body: '<!doctype html><script src="/compat.js"></script><script>new AbortController().signal.throwIfAborted(); globalThis.bootReady = Promise.withResolvers(); bootReady.resolve("ready");' + (mode === 'bundle' ? 'globalThis.collectionBoot = Object.hasOwn(structuredClone({ values: [3, 1, 2].toSorted().toReversed() }), "values") && [1, 2].findLast(Boolean) === 2 && [1, 2].findLastIndex(Boolean) === 1 && [1, 2].at(-1) === 2 && "abc".at(-1) === "c";' : '') + '</script>' })
     })
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
@@ -48,6 +63,39 @@ try {
     })
     assert.deepEqual(promise, { subclass: true, invalid: [true, true, true], value: 'settled', rejected: 'rejected', enumerable: false })
     if (mode === 'bundle') {
+      assert.deepEqual(await page.evaluate(() => clientApisMissingAtStart), Array(8).fill('undefined'))
+      assert.equal(await page.evaluate(() => collectionBoot), true, 'Published-client collection APIs must be available to the first boot script')
+      const collections = await page.evaluate(() => {
+        const original = [3, 1, 2]
+        const sorted = original.toSorted((left, right) => left - right)
+        const reversed = original.toReversed()
+        const shared = { enabled: true }
+        const source = { left: shared, right: shared, rows: new Map([['created', new Date(0)]]) }
+        source.self = source
+        const copy = structuredClone(source)
+        copy.left.enabled = false
+        let rejectedFunction = false
+        try { structuredClone({ callback() {} }) } catch (error) { rejectedFunction = error.name === 'DataCloneError' }
+        const buffer = new ArrayBuffer(2)
+        new Uint8Array(buffer)[0] = 7
+        const transferred = structuredClone({ buffer }, { transfer: [buffer] })
+        const invalidReceivers = []
+        for (const method of [Array.prototype.at, Array.prototype.toSorted, Array.prototype.toReversed]) {
+          try { method.call(null); invalidReceivers.push(false) } catch (error) { invalidReceivers.push(error instanceof TypeError) }
+        }
+        return {
+          sorted, reversed, original, negativeIndex: 'abc'.at(-1),
+          hasOwn: [Object.hasOwn(Object.create({ inherited: true }), 'inherited'), Object.hasOwn({ field: undefined }, 'field')],
+          findLast: [1, 2, 3].findLast(value => value < 3), findLastIndex: [1, 2, 3].findLastIndex(value => value < 3),
+          clone: [copy !== source, copy.self === copy, copy.left === copy.right, source.left.enabled, copy.rows.get('created').getTime()],
+          transfer: [buffer.byteLength, new Uint8Array(transferred.buffer)[0]], rejectedFunction, invalidReceivers,
+        }
+      })
+      assert.deepEqual(collections, {
+        sorted: [1, 2, 3], reversed: [2, 1, 3], original: [3, 1, 2], negativeIndex: 'c',
+        hasOwn: [false, true], findLast: 2, findLastIndex: 1,
+        clone: [true, true, true, true, 0], transfer: [0, 7], rejectedFunction: true, invalidReceivers: [true, true, true],
+      })
       const signal = await page.evaluate(() => {
         const left = new AbortController(), right = new AbortController()
         let added = 0, removed = 0, events = 0
@@ -172,13 +220,15 @@ try {
     globalThis.originalAny = AbortSignal.any
     globalThis.originalCheck = AbortSignal.prototype.throwIfAborted
     globalThis.originalAbort = AbortController.prototype.abort
+    globalThis.originalCollections = [Object.hasOwn, Array.prototype.at, String.prototype.at, Array.prototype.findLast, Array.prototype.findLastIndex, Array.prototype.toSorted, Array.prototype.toReversed]
   })
   await native.addScriptTag({ content: bundle })
   await native.addScriptTag({ content: shim })
   assert.equal(await native.evaluate(() => originalPromise === Promise.withResolvers && originalAny === AbortSignal.any
     && originalCheck === AbortSignal.prototype.throwIfAborted && originalAbort === AbortController.prototype.abort), true)
+  assert.equal(await native.evaluate(() => originalCollections.every((value, index) => value === [Object.hasOwn, Array.prototype.at, String.prototype.at, Array.prototype.findLast, Array.prototype.findLastIndex, Array.prototype.toSorted, Array.prototype.toReversed][index])), true)
   await native.close()
-  console.log('Native browser Promise and AbortSignal implementations remained unchanged')
+  console.log('Native browser Promise, AbortSignal and collection implementations remained unchanged')
 } finally {
   await browser.close()
 }

@@ -65,8 +65,9 @@ jobs:
     name: Publish npm package
     needs: package
     # Publishing is the upstream project's action: a fork has no NPM_TOKEN, and a
-    # fork release is published as a GitHub Release asset only. The `if` keeps the
-    # job green-skipped upstream so `github-release` still runs there.
+    # fork release is published as a GitHub Release asset only. The `if` skips
+    # the job in a fork; `github-release` states its own condition so that this
+    # skip does not suppress it.
     if: github.repository == 'saya-ch/dsh-mobile'
     permissions:
       contents: read
@@ -99,10 +100,13 @@ jobs:
 
   github-release:
     name: GitHub release
-    # Depends on publish so a GitHub release can never precede the npm integrity
-    # reconciliation upstream. In a fork the publish job is skipped by its `if`,
-    # and a skipped dependency still satisfies `needs`, so this runs there too.
+    # A required job that is skipped also skips its dependents, so the fork's
+    # skipped npm publish would suppress this job too. `always()` with an
+    # explicit result check keeps the upstream ordering — a failed publish
+    # still blocks the GitHub Release — while a fork, whose publish is skipped
+    # rather than failed, still gets its release.
     needs: publish
+    if: always() && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
