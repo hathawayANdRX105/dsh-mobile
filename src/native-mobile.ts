@@ -274,11 +274,42 @@ export const NATIVE_MOBILE_STYLES = `
 ` + MOBILE_COMPOSER_TOOLBAR_STYLES
 
 function classToken(element: Element, suffix: string): boolean {
-  return Array.from(element.classList).some(value => value.endsWith(suffix))
+  // Walk the live DOMTokenList instead of copying it: this runs once per classed
+  // element in the conversation subtree on every surface sync.
+  const tokens = element.classList
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index]!.endsWith(suffix)) return true
+  }
+  return false
 }
 
 function firstByClassSuffix(root: ParentNode, suffix: string): HTMLElement | undefined {
-  return Array.from(root.querySelectorAll<HTMLElement>('[class]')).find(element => classToken(element, suffix))
+  // Iterating the NodeList stops at the first match. Materializing it first
+  // allocated every classed element in the subtree before the search began,
+  // which is the whole transcript on a long session.
+  for (const element of root.querySelectorAll<HTMLElement>('[class]')) {
+    if (classToken(element, suffix)) return element
+  }
+  return undefined
+}
+
+/**
+ * Assign a class string only when it actually differs.
+ *
+ * The mobile surface sync runs from a `MutationObserver` watching `class` on the
+ * whole body, and both the `className` setter and `setAttribute` queue a
+ * mutation record even when the new value equals the old one. An unconditional
+ * write therefore re-enters the observer, which schedules the next sync, which
+ * writes again: a loop that holds one full-surface scan per animation frame for
+ * as long as a conversation is open.
+ */
+function assignClass(element: Element, value: string): void {
+  if (element.className !== value) element.className = value
+}
+
+/** Assign an attribute only when it actually differs. See `assignClass`. */
+function assignAttribute(element: Element, name: string, value: string): void {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value)
 }
 
 /**
@@ -1354,7 +1385,6 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     // Reuse the current DSH option classes so this injected action follows the
     // native menu's spacing, colors, and dark-mode states instead of creating a
     // second mobile-only visual language.
-    cameraButton.className = 'dsh-mobile-media-action'
     const nativeItem = (() => {
       let sibling = sectionTitle.nextElementSibling
       while (sibling instanceof HTMLElement && sibling.getAttribute('role') !== 'presentation') {
@@ -1363,18 +1393,24 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       }
       return undefined
     })()
+    // Resolve the final class before touching the element. Assigning the
+    // placeholder first and the native class second made both writes differ from
+    // the current value on every pass, so each surface sync still produced two
+    // `class` mutation records, the observer re-entered, and the sync ran again
+    // one frame later. One assignment that converges on the same value is what
+    // stops that loop.
+    assignClass(cameraButton, nativeItem === undefined ? 'dsh-mobile-media-action' : nativeItem.className)
     if (nativeItem !== undefined) {
-      cameraButton.className = nativeItem.className
       const cameraIcon = cameraButton.firstElementChild
       const cameraLabel = cameraButton.lastElementChild
       const nativeIcon = firstByClassSuffix(nativeItem, '_itemIcon')
       const nativeLabel = firstByClassSuffix(nativeItem, '_itemName')
-      if (cameraIcon instanceof HTMLElement && nativeIcon !== undefined) cameraIcon.className = nativeIcon.className
-      if (cameraLabel instanceof HTMLElement && nativeLabel !== undefined) cameraLabel.className = nativeLabel.className
+      if (cameraIcon instanceof HTMLElement && nativeIcon !== undefined) assignClass(cameraIcon, nativeIcon.className)
+      if (cameraLabel instanceof HTMLElement && nativeLabel !== undefined) assignClass(cameraLabel, nativeLabel.className)
     }
-    cameraButton.setAttribute('role', 'option')
-    cameraButton.setAttribute('aria-selected', 'false')
-    cameraButton.setAttribute('aria-label', label('Scatta foto', 'Take photo', '拍照'))
+    assignAttribute(cameraButton, 'role', 'option')
+    assignAttribute(cameraButton, 'aria-selected', 'false')
+    assignAttribute(cameraButton, 'aria-label', label('Scatta foto', 'Take photo', '拍照'))
 
     let lastItem: Element = sectionTitle
     let sibling = sectionTitle.nextElementSibling

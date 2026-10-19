@@ -17,6 +17,7 @@ import {
   isSidebarRightControl,
   isWideViewportLayout,
   resolveComposerImePolicy,
+  resolveKeyboardInset,
   resolveMobileLayoutLanguage,
   resolveMobileRightbarLayout,
 } from '../src/mobile-layout.js'
@@ -602,6 +603,24 @@ describe('dedicated mobile layout boot', () => {
     expect(isWideViewportLayout(899)).toBe(false)
     expect(isWideViewportLayout(900)).toBe(true)
     expect(isWideViewportLayout(1920)).toBe(true)
+  })
+
+  it('reserves only the height an on-screen keyboard actually covers', () => {
+    // Keyboard open: the layout viewport keeps its height, the visual viewport shrinks.
+    expect(resolveKeyboardInset(844, 544, 0)).toBe(300)
+    // Scrolled visual viewport: only the part below it is still covered.
+    expect(resolveKeyboardInset(844, 544, 100)).toBe(200)
+    // Nothing covered.
+    expect(resolveKeyboardInset(844, 844, 0)).toBe(0)
+    // Browser chrome and rounding stay below the threshold.
+    expect(resolveKeyboardInset(844, 794, 0)).toBe(0)
+    expect(resolveKeyboardInset(844, 795, 0)).toBe(0)
+    // A layout viewport that already resized leaves nothing to reserve.
+    expect(resolveKeyboardInset(544, 544, 0)).toBe(0)
+    // Unusable values never reserve space.
+    expect(resolveKeyboardInset(Number.NaN, 544, 0)).toBe(0)
+    expect(resolveKeyboardInset(844, Number.POSITIVE_INFINITY, 0)).toBe(0)
+    expect(resolveKeyboardInset(844, 544, Number.NaN)).toBe(0)
   })
 
   it.each([

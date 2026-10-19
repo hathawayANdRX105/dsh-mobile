@@ -76,6 +76,12 @@ export interface TaskNotifyOptions {
 }
 
 const MAX_SEEN_QUESTION_KEYS = 20
+/**
+ * Shortest gap between two observer-driven evaluations. Detection only has to
+ * keep up with a notification, so a token burst collapses instead of running a
+ * document-wide selector per mutation.
+ */
+const EVALUATE_THROTTLE_MS = 200
 
 /** A bounded native identifier derived from the complete, case-sensitive wire ID. */
 function notificationIdentity(value: string): string {
@@ -247,6 +253,31 @@ export function pendingInputQuestionKey(root: ParentNode): string | undefined {
   return key
 }
 
+/**
+ * Presence and key of the waiting-input card, resolved with one lookup.
+ *
+ * `hasPendingInputQuestion` and `pendingInputQuestionKey` each run the same
+ * document-wide selector. This watcher runs on every DOM mutation, so calling
+ * both doubled the per-token cost of a streaming reply for one answer.
+ *
+ * @param root Node to search, normally the document.
+ * @returns Whether a card is present and its stable key, when the DOM exposes one.
+ */
+export function readPendingInputQuestion(root: ParentNode): {
+  readonly pending: boolean
+  readonly key: string | undefined
+} {
+  if (typeof root.querySelector !== 'function') return { pending: false, key: undefined }
+  const card = root.querySelector('[data-question-key],[data-plan-review-key]') as {
+    getAttribute?: (name: string) => string | null
+  } | null
+  if (card === null) return { pending: false, key: undefined }
+  const getAttribute = card.getAttribute
+  if (typeof getAttribute !== 'function') return { pending: true, key: undefined }
+  const key = getAttribute.call(card, 'data-question-key') ?? getAttribute.call(card, 'data-plan-review-key')
+  return { pending: true, key: key === null || key === '' ? undefined : key }
+}
+
 /** Observe assistant-side conversation mutations; returns a disposer. */
 export function observeTaskActivity(
   target: Node,
@@ -379,17 +410,46 @@ export function installTaskCompletionWatcher(options: TaskWatcherLabels): () => 
     if (notifyBlocked) return
     if (!fireTaskNotifyEvent(event, () => { notifyBlocked = true })) return
   }
+  let lastEvaluateAt = 0
+  let evaluateTimer = 0
   const evaluateNow = (): void => {
+    lastEvaluateAt = Date.now()
     const busy = completionFallback && readComposerBusyState(document)
+    const pending = readPendingInputQuestion(document)
     const event = tracker.evaluate({
       pageHidden: document.hidden,
-      pendingQuestion: hasPendingInputQuestion(document),
-      questionKey: pendingInputQuestionKey(document),
+      pendingQuestion: pending.pending,
+      questionKey: pending.key,
       sessionLabel: readSessionLabel(document.title),
       composerBusy: busy,
     })
     if (event !== undefined) fire(event)
     scheduleAnchorTimer()
+  }
+  /**
+   * Leading-edge throttle for observer wakeups. A streaming reply produces a
+   * mutation batch per token, and each batch used to run two document-wide
+   * selectors plus a title normalization. Detection only has to keep up with a
+   * notification, so the first change is evaluated immediately and any further
+   * batch inside the window collapses into one trailing evaluation. The anchor
+   * timer and the visibility handler still evaluate immediately, so the state
+   * that decides an announcement is never held back by this window.
+   */
+  const requestEvaluation = (): void => {
+    const elapsed = Date.now() - lastEvaluateAt
+    if (elapsed >= EVALUATE_THROTTLE_MS) {
+      if (evaluateTimer !== 0) {
+        window.clearTimeout(evaluateTimer)
+        evaluateTimer = 0
+      }
+      evaluateNow()
+      return
+    }
+    if (evaluateTimer !== 0) return
+    evaluateTimer = window.setTimeout(() => {
+      evaluateTimer = 0
+      evaluateNow()
+    }, EVALUATE_THROTTLE_MS - elapsed)
   }
   // The interval is only a backstop: an anchor schedules its own exact shot
   // so completion announces ~grace after the run ends instead of waiting out
@@ -411,7 +471,7 @@ export function installTaskCompletionWatcher(options: TaskWatcherLabels): () => 
   }
   const disposeObservation = observeTaskActivity(document.documentElement, () => {
     if (completionFallback) tracker.markActivity()
-    evaluateNow()
+    requestEvaluation()
   })
   const onVisibility = (): void => { evaluateNow() }
   document.addEventListener('visibilitychange', onVisibility)
@@ -424,5 +484,6 @@ export function installTaskCompletionWatcher(options: TaskWatcherLabels): () => 
     document.removeEventListener('visibilitychange', onVisibility)
     if (timer !== 0) window.clearInterval(timer)
     if (anchorTimer !== 0) window.clearTimeout(anchorTimer)
+    if (evaluateTimer !== 0) window.clearTimeout(evaluateTimer)
   }
 }

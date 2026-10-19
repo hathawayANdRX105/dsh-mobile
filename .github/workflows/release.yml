@@ -64,6 +64,10 @@ jobs:
   publish:
     name: Publish npm package
     needs: package
+    # Publishing is the upstream project's action: a fork has no NPM_TOKEN, and a
+    # fork release is published as a GitHub Release asset only. The `if` keeps the
+    # job green-skipped upstream so `github-release` still runs there.
+    if: github.repository == 'saya-ch/dsh-mobile'
     permissions:
       contents: read
       id-token: write
@@ -95,6 +99,9 @@ jobs:
 
   github-release:
     name: GitHub release
+    # Depends on publish so a GitHub release can never precede the npm integrity
+    # reconciliation upstream. In a fork the publish job is skipped by its `if`,
+    # and a skipped dependency still satisfies `needs`, so this runs there too.
     needs: publish
     runs-on: ubuntu-latest
     permissions:

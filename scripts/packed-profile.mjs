@@ -59,7 +59,10 @@ export async function packBundle(source, destination) {
   const output = await runPackagingCommand(process.execPath, [
     await npmCli(), 'pack', '--ignore-scripts', '--json', '--pack-destination', destination,
   ], source)
-  const [packed] = JSON.parse(output)
+  // npm 11 reports `pack --json` as an array; npm 12 reports an object keyed by
+  // package name. Accept both so the smoke runs on either CLI.
+  const reported = JSON.parse(output)
+  const packed = Array.isArray(reported) ? reported[0] : Object.values(reported)[0]
   if (typeof packed?.filename !== 'string' || /[/\\]/u.test(packed.filename)) {
     throw new Error('npm pack returned no package filename')
   }

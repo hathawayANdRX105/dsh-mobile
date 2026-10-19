@@ -131,11 +131,32 @@ const MAX_MOBILE_BOOT_ENTRY_BYTES = 8 * 1024 * 1024
 const MOBILE_BOOT_CHUNK_BYTES = 16 * 1024 * 1024
 /** Bytes the assembly emits after each entry (`body` plus `\n;\n`). */
 const MOBILE_BOOT_SEPARATOR_BYTES = 3
-/** Freshness window for cached upstream bundle byte sizes. */
-const MOBILE_BOOT_SIZE_CACHE_TTL_MS = 30_000
+/**
+ * Freshness window for cached upstream bundle byte sizes. A plugin bundle only
+ * changes when its `rev` query changes, so this bounds memory refreshes rather
+ * than correctness; the probe runs on the page-load path and re-reading tens of
+ * megabytes every thirty seconds spent the phone's wait on the upstream's I/O.
+ */
+const MOBILE_BOOT_SIZE_CACHE_TTL_MS = 5 * 60_000
 /** Marker header distinguishing size probes from ordinary proxied bundle fetches. */
 const MOBILE_BOOT_SIZE_PROBE_HEADER = 'x-dsh-mobile-size-probe'
 const MAX_MOBILE_BOOT_BATCHES = 8
+/**
+ * Rewritten documents kept per gateway. One entry covers each combination of
+ * client-module selection, CSRF cookie and layout file that a paired device can
+ * present; the bound stops an unbounded set of selections from pinning HTML in
+ * memory.
+ */
+const MAX_MOBILE_INDEX_CACHE_ENTRIES = 16
+/**
+ * How long a stored document may be served. The document embeds the boot
+ * manifest's bundle URLs, which carry the upstream DSH revision; a DSH restart
+ * or plugin update changes those URLs, and the gateway has no signal for it
+ * beyond re-reading the upstream index. The window bounds how long an updated
+ * upstream can be masked, at the cost of one re-read and rewrite per window
+ * instead of one per page load.
+ */
+const MOBILE_INDEX_CACHE_TTL_MS = 60_000
 const MOBILE_BOOT_UPSTREAM_ATTEMPTS = 4
 const MOBILE_BOOT_RETRY_DELAY_MS = 150
 
@@ -342,6 +363,29 @@ interface MobileBootBatchAssembly {
 }
 
 const gzipBuffer = promisify(gzip)
+
+/**
+ * zlib level for bodies the gateway compresses on every request. A phone link is
+ * the constrained side, so the few percent of extra bytes level 1 costs buy more
+ * than the CPU it saves; it is also the level that keeps a cold proxy from
+ * stalling the event loop while a bundle streams past.
+ */
+const PROXY_GZIP_LEVEL = 1
+
+interface StoredMobileIndex {
+  readonly body: Buffer
+  readonly etag: string
+  readonly at: number
+  /**
+   * Merged batches this document references. A served document points at batch
+   * URLs the gateway assembles on demand, and the batch map is bounded, so the
+   * plans have to travel with the document: a cache hit that skipped
+   * re-registering them could hand out a document whose boot URLs 404 once the
+   * batch map has evicted them.
+   */
+  readonly batches: readonly MobileBootBatchPlan[]
+  gzipBody?: Buffer
+}
 
 function ensureMobileViewport(html: string): string {
   const viewport = /<meta\b(?=[^>]*\bname\s*=\s*["']viewport["'])[^>]*>/iu
@@ -911,9 +955,11 @@ function isCompressibleContentType(value: string | string[] | undefined): boolea
 }
 
 function canCompressResponse(request: IncomingMessage, response: IncomingMessage): boolean {
-  const pathname = request.url?.split('?', 1)[0] ?? ''
-  const compressibleRequest = (request.method === 'GET' || request.method === 'HEAD')
-    && (pathname.startsWith('/plugins/') || pathname.startsWith('/assets/'))
+  const compressibleRequest = request.method === 'GET' || request.method === 'HEAD'
+  // Gate on the response's own media type rather than a path allowlist. Session
+  // state, settings and module catalogs travel as `/api/**` JSON and were the
+  // largest uncompressed bodies a phone ever pulled, behind a link where bytes
+  // are the scarce resource.
   return compressibleRequest
     && response.statusCode === 200
     && request.headers.range === undefined
@@ -1161,6 +1207,13 @@ export class MobileAccessGateway {
   private readonly mobileBootBatches = new Map<string, StoredMobileBootBatch>()
   /** Cached upstream bundle byte sizes (HEAD probes), keyed by resource URL. */
   private readonly bootEntrySizeCache = new Map<string, { size: number; at: number }>()
+  /**
+   * Rewritten GUI documents keyed by the inputs that determine their bytes. The
+   * upstream index is never revalidated toward the client — the gateway strips
+   * the client's conditional headers before forwarding — so without this every
+   * page load pays a full upstream fetch, a rewrite, and an uncompressed body.
+   */
+  private readonly mobileIndexCache = new Map<string, StoredMobileIndex>()
   private readonly extensionEventListeners = new Set<(revision: number) => void>()
   private extensionEventRevision = 0
   private readonly taskEventListeners = new Set<(payload: string) => void>()
@@ -2002,6 +2055,9 @@ export class MobileAccessGateway {
         const etag = `"${createHash('sha256').update(body).digest('hex')}"`
         const responseHeaders: Record<string, string | number> = { ETag: etag }
         if (mtime !== undefined) responseHeaders['Last-Modified'] = mtime.toUTCString()
+        // No cache directive here on purpose: these four files are the ones the
+        // `/mobile` flow rewrites by hand and that the phone must re-read, so the
+        // `no-store` set by setSecurityHeaders stays the governing policy.
         if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
           setSecurityHeaders(response, this.tlsEnabled)
           response.writeHead(304, responseHeaders)
@@ -2009,12 +2065,17 @@ export class MobileAccessGateway {
           return
         }
         setSecurityHeaders(response, this.tlsEnabled)
+        const compress = acceptsGzip(headerValue(request.headers, 'accept-encoding'))
+          && isCompressibleContentType(customAsset.contentType)
+        if (compress) addVaryAcceptEncoding(responseHeaders)
+        const payload = compress ? await gzipBuffer(body, { level: PROXY_GZIP_LEVEL }) : body
         response.writeHead(200, {
           ...responseHeaders,
           'Content-Type': customAsset.contentType,
-          'Content-Length': body.byteLength,
+          'Content-Length': payload.byteLength,
+          ...(compress ? { 'Content-Encoding': 'gzip' } : {}),
         })
-        if (request.method === 'HEAD') response.end(); else response.end(body)
+        if (request.method === 'HEAD') response.end(); else response.end(payload)
         return
       } finally {
         operation.release()
@@ -2461,59 +2522,107 @@ export class MobileAccessGateway {
     const onClose = (): void => { operation.abort(); operation.release() }
     response.once('close', onClose)
     try {
-      const index = await this.fetchAuthenticatedUpstreamIndex(operation.signal, request)
-      let body: Buffer
-      if (stockFrontend) body = Buffer.from(ensureMobileGatewayMarker(index.html))
-      else {
-        const preference = await this.clientModulePreferences.read(authorization.deviceId)
-        const excludedClientModules = preference.excludedClientModules
-        try {
-          const html = index.html
-          const plan = parseMobileBootPlan(html, excludedClientModules)
-          const options = plan.rewrittenBatchEntries === undefined
-            ? { excludedClientModules }
-            : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries), operation.signal), excludedClientModules }
-          const cookies = browserAuthCookies(request.headers.cookie)
-          const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
-          const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
-          for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
-          body = Buffer.from(rewritten.html)
-        } catch (error) {
-          if (error instanceof ExcludedClientModulesError) {
-            const detail = error.message.replace(/[\r\n]/gu, ' ').slice(0, 512)
-            if (detail !== this.lastModuleExclusionError) {
-              this.lastModuleExclusionError = detail
-              process.emitWarning(detail, { code: 'DSH_MOBILE_MODULE_EXCLUSION_INVALID' })
-            }
-            if (preference.source === 'device' || preference.source === 'computer') {
-              operation.signal.throwIfAborted()
-              const locale = resolveAuthPageLocale(headerValue(request.headers, 'accept-language'))
-              const recovery = Buffer.from(renderClientModuleRecoveryPage(locale))
-              // A valid owned document uses 200 so Android does not replace its recovery action with a generic HTTP-error dialog.
-              setSecurityHeaders(response, this.tlsEnabled)
-              response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': recovery.byteLength })
-              response.end(recovery)
+      const cookies = browserAuthCookies(request.headers.cookie)
+      const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
+      // The stock diagnostic entrypoint carries no module selection, so its
+      // document depends only on the CSRF cookie the client will send.
+      const preference = stockFrontend ? undefined : await this.clientModulePreferences.read(authorization.deviceId)
+      // The upstream request keeps the caller's own URL, and the document it
+      // answers with can differ per URL, so the target is part of the identity.
+      const target = request.url ?? '/'
+      const cacheKey = preference === undefined
+        ? `stock:${target}:${csrfCookie}`
+        : `${target}:${preference.excludedClientModules.join(',')}:${csrfCookie}:${await this.mobileLayoutStamp()}`
+      let stored = this.mobileIndexCache.get(cacheKey)
+      if (stored !== undefined && Date.now() - stored.at >= MOBILE_INDEX_CACHE_TTL_MS) {
+        this.mobileIndexCache.delete(cacheKey)
+        stored = undefined
+      }
+      if (stored === undefined) {
+        const index = await this.fetchAuthenticatedUpstreamIndex(operation.signal, request)
+        let body: Buffer
+        let batches: readonly MobileBootBatchPlan[] = []
+        if (preference === undefined) body = Buffer.from(ensureMobileGatewayMarker(index.html))
+        else {
+          try {
+            const html = index.html
+            const plan = parseMobileBootPlan(html, preference.excludedClientModules)
+            const options = plan.rewrittenBatchEntries === undefined
+              ? { excludedClientModules: preference.excludedClientModules }
+              : {
+                  ...await this.resolveMobileBootSizes(
+                    plan.rewrittenBatchEntries.flatMap(batch => batch.entries), operation.signal),
+                  excludedClientModules: preference.excludedClientModules,
+                }
+            const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
+            batches = rewritten.batches
+            body = Buffer.from(rewritten.html)
+          } catch (error) {
+            if (error instanceof ExcludedClientModulesError) {
+              const detail = error.message.replace(/[\r\n]/gu, ' ').slice(0, 512)
+              if (detail !== this.lastModuleExclusionError) {
+                this.lastModuleExclusionError = detail
+                process.emitWarning(detail, { code: 'DSH_MOBILE_MODULE_EXCLUSION_INVALID' })
+              }
+              if (preference.source === 'device' || preference.source === 'computer') {
+                operation.signal.throwIfAborted()
+                const locale = resolveAuthPageLocale(headerValue(request.headers, 'accept-language'))
+                const recovery = Buffer.from(renderClientModuleRecoveryPage(locale))
+                // A valid owned document uses 200 so Android does not replace its recovery action with a generic HTTP-error dialog.
+                setSecurityHeaders(response, this.tlsEnabled)
+                response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': recovery.byteLength })
+                response.end(recovery)
+                return
+              }
+              sendJson(response, 409, { error: 'excluded_client_modules_invalid', detail }, this.tlsEnabled)
               return
             }
-            sendJson(response, 409, { error: 'excluded_client_modules_invalid', detail }, this.tlsEnabled)
-            return
+            throw new HttpError(502, 'upstream_unavailable')
           }
-          throw new HttpError(502, 'upstream_unavailable')
+        }
+        stored = { body, batches, at: Date.now(), etag: `"${createHash('sha256').update(body).digest('hex')}"` }
+        this.mobileIndexCache.set(cacheKey, stored)
+        while (this.mobileIndexCache.size > MAX_MOBILE_INDEX_CACHE_ENTRIES) {
+          const oldest = this.mobileIndexCache.keys().next().value as string | undefined
+          if (oldest === undefined) break
+          this.mobileIndexCache.delete(oldest)
         }
       }
       operation.signal.throwIfAborted()
-      const headers = sanitizeResponseHeaders(index.headers, this.config.upstreamOrigin)
-      delete headers['content-length']
-      delete headers['content-encoding']
-      delete headers.etag
+      // Re-register on every serve, including cache hits: this keeps the batch
+      // map's recency ordering aligned with what devices are actually loading,
+      // so the documents handed out still resolve their boot URLs.
+      for (const batch of stored.batches) this.rememberMobileBootBatch(batch)
+      // The document is rewritten per request, so the upstream validator never
+      // describes these bytes. Answer revalidation from the stored ETag instead
+      // of dropping the client's conditional headers on the floor.
+      const revalidated = matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), stored.etag)
+      const compress = acceptsGzip(headerValue(request.headers, 'accept-encoding'))
+      const responseHeaders: Record<string, string | number> = {
+        'Content-Type': 'text/html; charset=utf-8',
+        ETag: stored.etag,
+        // The boot manifest inside this document is rewritten from the live
+        // client-module selection, so the bytes are valid only for this session's
+        // module choice; let the phone revalidate rather than reuse a stale boot.
+        'Cache-Control': 'private, no-cache',
+      }
+      // The body depends on Accept-Encoding whether or not this request was
+      // compressed, so the header cannot be conditional on the current request.
+      addVaryAcceptEncoding(responseHeaders)
       // The proxied GUI document: it must be able to frame its own surfaces.
       setSecurityHeaders(response, this.tlsEnabled, 'proxied')
+      if (revalidated) {
+        response.writeHead(304, responseHeaders)
+        response.end()
+        return
+      }
+      const payload = compress ? await this.gzipStored(stored) : stored.body
       response.writeHead(200, {
-        ...headers,
-        'Content-Type': 'text/html; charset=utf-8',
-        'Content-Length': body.byteLength,
+        ...responseHeaders,
+        'Content-Length': payload.byteLength,
+        ...(compress ? { 'Content-Encoding': 'gzip' } : {}),
       })
-      response.end(body)
+      response.end(payload)
     } catch (error) {
       holder.request?.destroy()
       if (error instanceof HttpError) throw error
@@ -2523,6 +2632,26 @@ export class MobileAccessGateway {
       response.removeListener('close', onClose)
       operation.release()
     }
+  }
+
+  /**
+   * Identity of the layout module as the rewritten document embeds it. A custom
+   * layout edit changes the bytes the boot batch serves, so it has to
+   * invalidate the document that references that batch.
+   */
+  private async mobileLayoutStamp(): Promise<string> {
+    try {
+      const info = await stat(this.config.mobileLayoutFile)
+      return `${info.mtimeMs}:${info.size}`
+    } catch {
+      return 'absent'
+    }
+  }
+
+  /** Compress a stored document once; the result is reused across requests. */
+  private async gzipStored(stored: StoredMobileIndex): Promise<Buffer> {
+    stored.gzipBody ??= await gzipBuffer(stored.body, { level: PROXY_GZIP_LEVEL })
+    return stored.gzipBody
   }
 
   private rememberMobileBootBatch(plan: MobileBootBatchPlan): void {
@@ -2612,6 +2741,16 @@ export class MobileAccessGateway {
       if (proxied.statusCode !== 200) {
         proxied.resume()
         return undefined
+      }
+      // A declared length answers the only question this probe asks, so it never
+      // has to pull the body. Chunks that arrive without one still count, as
+      // before, and the per-entry cap keeps a surprise body bounded.
+      const declared = Number(proxied.headers['content-length'])
+      if (Number.isSafeInteger(declared) && declared >= 0 && proxied.headers['content-encoding'] === undefined) {
+        proxied.resume()
+        if (declared >= MAX_MOBILE_BOOT_ENTRY_BYTES) return undefined
+        this.bootEntrySizeCache.set(source, { size: declared, at: Date.now() })
+        return declared
       }
       const size = await new Promise<number | undefined>((resolve, reject) => {
         let bytes = 0
@@ -2978,7 +3117,9 @@ export class MobileAccessGateway {
       response.writeHead(statusCode, headers)
       await Promise.all([
         bodyDone,
-        compressed && request.method !== 'HEAD' ? pipeline(proxied, createGzip(), response) : pipeline(proxied, response),
+        compressed && request.method !== 'HEAD'
+          ? pipeline(proxied, createGzip({ level: PROXY_GZIP_LEVEL }), response)
+          : pipeline(proxied, response),
       ])
     } catch (error) {
       holder.request?.destroy()

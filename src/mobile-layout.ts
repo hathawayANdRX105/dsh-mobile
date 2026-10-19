@@ -98,6 +98,39 @@ export function isWideViewportLayout(viewportWidth: number): boolean {
   return viewportWidth >= WIDE_LAYOUT_MIN_WIDTH_PX
 }
 
+/**
+ * Smallest covered height treated as an on-screen keyboard.
+ *
+ * Browser chrome that shows and hides changes the layout viewport too, so it
+ * cancels out of the difference below. A threshold only rejects the few pixels
+ * of rounding and overscroll that would otherwise reserve a visible gap.
+ */
+const KEYBOARD_INSET_MIN_PX = 60
+
+/**
+ * Pixels of the layout viewport an on-screen keyboard covers.
+ *
+ * The mobile page leaves the browser's default `interactive-widget`, so the
+ * keyboard shrinks only the visual viewport: `100dvh` keeps its full height and
+ * the composer ends up underneath the keyboard. The gap between the layout and
+ * visual viewports is what has to be reserved at the bottom of the column.
+ *
+ * @param layoutHeight `window.innerHeight`, the layout viewport height.
+ * @param visualHeight `visualViewport.height`, the currently visible height.
+ * @param visualOffsetTop `visualViewport.offsetTop`, how far the visual viewport is scrolled.
+ * @returns Covered pixels, or zero when nothing is covered or a value is unusable.
+ */
+export function resolveKeyboardInset(
+  layoutHeight: number,
+  visualHeight: number,
+  visualOffsetTop: number,
+): number {
+  if (!Number.isFinite(layoutHeight) || !Number.isFinite(visualHeight) || !Number.isFinite(visualOffsetTop)) return 0
+  const covered = layoutHeight - visualHeight - visualOffsetTop
+  if (!Number.isFinite(covered) || covered <= KEYBOARD_INSET_MIN_PX) return 0
+  return Math.round(covered)
+}
+
 /** Resolved right-panel presentation for the dedicated responsive layout. */
 export interface MobileRightbarLayout {
   readonly docked: boolean
@@ -525,7 +558,7 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
 .dshm-shell{display:grid!important;grid-template-rows:minmax(0,1fr)!important;grid-template-columns:minmax(0,1fr)!important}
 @media(min-width:900px){.dshm-shell{grid-template-columns:auto minmax(0,1fr)!important}}
 }
-.dshm-main{grid-area:1/1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;margin-right:0;overflow:hidden;transition:margin-right var(--ds-transition-duration-slow,190ms) var(--ds-ease-in-out,ease)}
+.dshm-main{grid-area:1/1;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;margin-right:0;overflow:hidden;padding-bottom:var(--dshm-keyboard-inset,0px)}
 .dshm-mainContent{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden}
 .dshm-shell[data-rightbar-docked=true] .dshm-main{margin-right:var(--dshm-rightbar-width)}
 .dshm-shell[data-rightbar-docked=true] .dshm-details{position:absolute;width:var(--dshm-rightbar-width);box-shadow:none;padding-top:0}
@@ -533,9 +566,19 @@ html,body,#root{width:100%;height:100%;overflow:hidden}
    intercepting controls; only docked mode needs this column separator. */
 .dshm-shell[data-rightbar-docked=true] .dshm-details::after{content:"";position:absolute;inset:0 auto 0 0;width:.5px;background:var(--dsw-alias-border-l4);z-index:11;pointer-events:none}
 .dshm-main>*,.dshm-main>*>*{min-width:0}
-.dshm-drawer{position:fixed;z-index:70;inset:0 auto 0 0;box-sizing:border-box;width:56px;max-width:100%;padding-top:env(safe-area-inset-top);overflow:hidden;background:var(--dsw-alias-bg-layer-1,#f8fafc);box-shadow:none;will-change:width;transition:width 240ms cubic-bezier(.22,1,.36,1),box-shadow 240ms ease}
-.dshm-drawer[data-open=true]{width:min(88vw,340px);box-shadow:18px 0 46px rgb(15 23 42 / 18%)}
+.dshm-drawer{position:fixed;z-index:70;inset:0 auto 0 0;box-sizing:border-box;width:56px;max-width:100%;padding-top:env(safe-area-inset-top);overflow:hidden;background:var(--dsw-alias-bg-layer-1,#f8fafc);box-shadow:none;transition:box-shadow 240ms ease}
+.dshm-drawer[data-open=true]{width:min(88vw,340px);box-shadow:18px 0 46px rgb(15 23 42 / 18%);animation:dshm-drawer-reveal 200ms cubic-bezier(.22,1,.36,1)}
+@keyframes dshm-drawer-reveal{from{opacity:.72}to{opacity:1}}
 .dshm-drawer[data-open=false]{pointer-events:auto;visibility:visible}
+/* The drawer no longer animates its own width. Width is not compositable, so
+   animating it re-laid out the whole sidebar on every frame of the transition:
+   measured at 8 to 15 layout passes per toggle, against 1 to 6 for the state
+   change itself. An animated clip-path reveal still cost 8 to 12, and a
+   constant child width still cost 9 to 10, so neither is a way out, because a
+   persistent left rail and an expanding panel are two different layouts.
+   The width now snaps once per toggle and the opening motion is the composited
+   opacity keyframes animation above; the child keeps its original resting
+   offset, so the closed rail looks exactly as before. */
 .dshm-drawer>*{width:100%!important;height:100%!important;transform:translateX(-6px);opacity:.94;transition:transform 220ms cubic-bezier(.22,1,.36,1),opacity 160ms ease-out}
 .dshm-drawer[data-open=true]>*{transform:translateX(0);opacity:1}
 .dshm-drawer[data-open=false]>*{width:56px!important}
@@ -592,7 +635,7 @@ body:has(.dshm-shell) :is(input,textarea,[contenteditable=true],[contenteditable
 .dshm-drawer[data-open=true]{width:340px;box-shadow:none}
 .dshm-drawer[data-open=false]{width:56px}
 }
-@media(prefers-reduced-motion:reduce){.dshm-drawer,.dshm-details,.dshm-scrim,.dshm-drawer>*,.dshm-main{transition:none!important}}
+@media(prefers-reduced-motion:reduce){.dshm-drawer,.dshm-details,.dshm-scrim,.dshm-drawer>*,.dshm-main{transition:none!important;animation:none!important}}
 `
 
 function MobileAppFrame(props: MobileRootProps & {
@@ -636,6 +679,32 @@ function MobileAppFrame(props: MobileRootProps & {
     window.addEventListener('resize', resize)
     return () => {
       window.removeEventListener('resize', resize)
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+    }
+  }, [])
+  // The mobile page does not ask the browser to resize its layout viewport, so
+  // the shell keeps its full height while the on-screen keyboard shrinks only the
+  // visual viewport and covers the composer. Track that difference here and
+  // reserve it at the bottom of the column.
+  const [keyboardInset, setKeyboardInset] = useState(0)
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (viewport === null || viewport === undefined) return
+    let frame: number | undefined
+    const apply = (): void => {
+      frame = undefined
+      setKeyboardInset(resolveKeyboardInset(window.innerHeight, viewport.height, viewport.offsetTop))
+    }
+    const schedule = (): void => {
+      if (frame !== undefined) return
+      frame = window.requestAnimationFrame(apply)
+    }
+    viewport.addEventListener('resize', schedule)
+    viewport.addEventListener('scroll', schedule)
+    apply()
+    return () => {
+      viewport.removeEventListener('resize', schedule)
+      viewport.removeEventListener('scroll', schedule)
       if (frame !== undefined) window.cancelAnimationFrame(frame)
     }
   }, [])
@@ -787,7 +856,7 @@ function MobileAppFrame(props: MobileRootProps & {
   return createElement('div', {
     className: 'dshm-shell', lang: language,
     'data-rightbar-docked': rightbarDocked,
-    style: { '--dshm-rightbar-width': `${rightbar.width}px` },
+    style: { '--dshm-rightbar-width': `${rightbar.width}px`, '--dshm-keyboard-inset': `${keyboardInset}px` },
   },
     createElement('main', {
       className: 'dshm-main',
