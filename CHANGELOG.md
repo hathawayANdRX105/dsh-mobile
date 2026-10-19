@@ -2,6 +2,20 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.13-fork.1 - 2026-10-20
+
+- Fork build based on upstream 0.6.13 with local performance optimizations. See [FORK-ANALYSIS.md](FORK-ANALYSIS.md) for the measured root causes.
+- Fix the 60fps self-sustaining `MutationObserver` loop in `native-mobile.ts`: the camera action's class and ARIA writes now resolve to one final value and assign it once, so a repeat sync stops writing instead of re-triggering the observer (measured 443ms of style recalculation per 2 seconds → 0).
+- Replace the session-subtree materialization in `firstByClassSuffix` with a short-circuiting scan, so a long session no longer allocates and walks several element arrays per frame.
+- Merge the duplicate full-document question-card queries and throttle the completion-notification observer, so a streamed token no longer costs two document-wide selector calls (measured 464 → 67 calls per 200 tokens, 40.2ms → 4.0ms of script time).
+- Cache the rewritten GUI document with an ETag and gzip it; the upstream index is no longer re-fetched and re-rewritten on every page load, and the client's conditional requests are answered instead of dropped.
+- Compress local assets and proxy responses by media type rather than a path allowlist, at zlib level 1 to keep the phone link as the constrained side.
+- Raise the upstream bundle-size probe cache from 30 seconds to 5 minutes, so the page-load path stops re-reading tens of megabytes of bundles every thirty seconds.
+- Reserve the on-screen keyboard height above the composer from `visualViewport`, so the input is not covered when the soft keyboard opens.
+- Size the mobile access panel against the dynamic viewport, so the bottom of the panel is no longer cut off.
+- Remove the non-compositable `width` transition from the drawer and the `margin-right` transition from the main column, and replace them with composited opacity keyframes.
+- CI workflow adjusted to allow a fork GitHub Release without an npm publish.
+
 ## 0.6.13 - 2026-10-19
 
 - Distinguish inbound HTTP receive timeouts (408 `request_timeout`) and oversized request headers (431 `headers_too_large`) from other malformed HTTP requests (400 `bad_request`). Preserve the existing receive limits and single-attempt POST forwarding; do not automatically retry messages.

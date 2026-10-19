@@ -26,13 +26,13 @@
   <a href="#兼容性">兼容性</a> ·
   <a href="docs/README.md">文档</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.13">更新记录</a> ·
+  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.13**。区分网关 HTTP 接收超时与请求头过大错误，增加隐私受限的拒绝诊断，并补充图文发送失败回归。Android App **0.6.5** 保持不变，无需同步升级。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.13) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.13-fork.1**。基于上游 0.6.13 的性能优化分支：修复 60fps 自持观察器循环与会话子树物化开销，合并并节流每 token 的全文档查询，为改写后的页面增加缓存、ETag 与压缩，移除不可合成的抽屉宽度过渡，并补齐软键盘视口内缩。Android App **0.6.5** 保持不变，无需同步升级。[更新与下载](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.1) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
