@@ -2,6 +2,11 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.13-fork.2 - 2026-10-20
+
+- Make the mobile surface sync event-driven instead of body-wide per-frame detection. The MutationObserver now filters out transcript growth and message-row restyling inside the conversation view before scheduling, the remaining schedules pass through a leading-edge 80ms throttle (first visible change immediate, bursts collapsed to at most one trailing sync per window), and drawer/details state changes are received from the DSH layout store's `panelInfo` observable instead of being re-detected from class mutations.
+- Measured on a paired 390×844 mobile page with a 9000-node transcript: opening and closing the sidebar dropped from ~9.8s to ~2.2s of main-thread task time, and a transcript rebuild dropped from ~10.3s to ~2.6s. The attachment-menu 60fps self-sustaining loop remains eliminated (0 rAF / 0 class writes when idle).
+
 ## 0.6.13-fork.1 - 2026-10-20
 
 - Fork build based on upstream 0.6.13 with local performance optimizations. See [FORK-ANALYSIS.md](FORK-ANALYSIS.md) for the measured root causes.
