@@ -2,6 +2,12 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.13-fork.3 - 2026-10-20
+
+- Compress the mobile real-time channel by default: `/api/remote.mux` (the WebSocket every session switch replays the transcript over) now uses permessage-deflate unless `websocketCompression.paths` is overridden, so re-opening a session transfers smaller payloads to the phone.
+- Add brotli to the gateway's compression negotiation (`Accept-Encoding: br`), keeping gzip for clients without it and identity when neither is accepted. Cached documents compress once per encoding and reuse the result. Measured on a paired 390×844 mobile page: the 9.59MB main boot bundle dropped from 4.03MB (gzip level 1) to 3.69MB on the wire, and `compat.js` from 36.3KB to 25.9KB.
+- The WebSocket compression default changes from `paths: []` to `paths: ['/api/remote.mux']`; an empty array still disables it.
+
 ## 0.6.13-fork.2 - 2026-10-20
 
 - Make the mobile surface sync event-driven instead of body-wide per-frame detection. The MutationObserver now filters out transcript growth and message-row restyling inside the conversation view before scheduling, the remaining schedules pass through a leading-edge 80ms throttle (first visible change immediate, bursts collapsed to at most one trailing sync per window), and drawer/details state changes are received from the DSH layout store's `panelInfo` observable instead of being re-detected from class mutations.

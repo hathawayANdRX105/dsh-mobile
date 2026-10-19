@@ -20,7 +20,7 @@ import { isIP } from './ip.js'
 import { Transform, type TransformCallback } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
-import { createGzip, gzip } from 'node:zlib'
+import { createBrotliCompress, createGzip, gzip, brotliCompress, constants as zlibConstants } from 'node:zlib'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import Bonjour from 'bonjour-service'
 import * as QRCode from 'qrcode'
@@ -351,6 +351,7 @@ interface StoredMobileBootBatch {
   readonly plan: MobileBootBatchPlan
   body?: Buffer
   gzipBody?: Buffer
+  brBody?: Buffer
   etag?: string
   layoutMtimeMs?: number
   /** In-flight assembly shared by every concurrent requester of this batch. */
@@ -363,6 +364,7 @@ interface MobileBootBatchAssembly {
 }
 
 const gzipBuffer = promisify(gzip)
+const brotliBuffer = promisify(brotliCompress)
 
 /**
  * zlib level for bodies the gateway compresses on every request. A phone link is
@@ -371,6 +373,33 @@ const gzipBuffer = promisify(gzip)
  * stalling the event loop while a bundle streams past.
  */
 const PROXY_GZIP_LEVEL = 1
+
+/**
+ * Brotli quality for bodies the gateway compresses. Modern mobile browsers all
+ * accept `br`, and on JavaScript bundles brotli is typically 15-25% smaller
+ * than gzip at the same speed. Quality 5 keeps the CPU cost close to gzip
+ * level 1 while the saved bytes stay on the constrained side of the link.
+ */
+const PROXY_BROTLI_QUALITY = 5
+
+interface CompressedBody {
+  readonly body: Buffer
+  readonly encoding: 'br' | 'gzip'
+}
+
+/** Compress a body once with the best encoding the request accepts; identity when none is accepted. */
+async function compressBody(body: Buffer, acceptEncoding: string | undefined): Promise<CompressedBody | undefined> {
+  if (acceptsBrotli(acceptEncoding)) {
+    return {
+      body: await brotliBuffer(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: PROXY_BROTLI_QUALITY } }),
+      encoding: 'br',
+    }
+  }
+  if (acceptsGzip(acceptEncoding)) {
+    return { body: await gzipBuffer(body, { level: PROXY_GZIP_LEVEL }), encoding: 'gzip' }
+  }
+  return undefined
+}
 
 interface StoredMobileIndex {
   readonly body: Buffer
@@ -385,6 +414,7 @@ interface StoredMobileIndex {
    */
   readonly batches: readonly MobileBootBatchPlan[]
   gzipBody?: Buffer
+  brBody?: Buffer
 }
 
 function ensureMobileViewport(html: string): string {
@@ -944,6 +974,22 @@ function acceptsGzip(header: string | undefined): boolean {
     if (name === '*') wildcard = quality > 0
   }
   return wildcard ?? false
+}
+
+function acceptsBrotli(header: string | undefined): boolean {
+  if (header === undefined) return false
+  for (const entry of header.split(',')) {
+    const [rawName, ...parameters] = entry.split(';')
+    const name = rawName?.trim().toLowerCase()
+    if (name === undefined || name === '') continue
+    let quality = 1
+    for (const parameter of parameters) {
+      const match = /^\s*q\s*=\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*$/iu.exec(parameter)
+      if (match !== null) quality = Number(match[1])
+    }
+    if (name === 'br') return quality > 0
+  }
+  return false
 }
 
 function isCompressibleContentType(value: string | string[] | undefined): boolean {
@@ -2065,15 +2111,17 @@ export class MobileAccessGateway {
           return
         }
         setSecurityHeaders(response, this.tlsEnabled)
-        const compress = acceptsGzip(headerValue(request.headers, 'accept-encoding'))
-          && isCompressibleContentType(customAsset.contentType)
+        const compress = isCompressibleContentType(customAsset.contentType)
         if (compress) addVaryAcceptEncoding(responseHeaders)
-        const payload = compress ? await gzipBuffer(body, { level: PROXY_GZIP_LEVEL }) : body
+        const compressed = compress
+          ? await compressBody(body, headerValue(request.headers, 'accept-encoding'))
+          : undefined
+        const payload = compressed?.body ?? body
         response.writeHead(200, {
           ...responseHeaders,
           'Content-Type': customAsset.contentType,
           'Content-Length': payload.byteLength,
-          ...(compress ? { 'Content-Encoding': 'gzip' } : {}),
+          ...(compressed === undefined ? {} : { 'Content-Encoding': compressed.encoding }),
         })
         if (request.method === 'HEAD') response.end(); else response.end(payload)
         return
@@ -2597,7 +2645,8 @@ export class MobileAccessGateway {
       // describes these bytes. Answer revalidation from the stored ETag instead
       // of dropping the client's conditional headers on the floor.
       const revalidated = matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), stored.etag)
-      const compress = acceptsGzip(headerValue(request.headers, 'accept-encoding'))
+      const acceptEncoding = headerValue(request.headers, 'accept-encoding')
+      const compress = acceptsBrotli(acceptEncoding) || acceptsGzip(acceptEncoding)
       const responseHeaders: Record<string, string | number> = {
         'Content-Type': 'text/html; charset=utf-8',
         ETag: stored.etag,
@@ -2616,11 +2665,12 @@ export class MobileAccessGateway {
         response.end()
         return
       }
-      const payload = compress ? await this.gzipStored(stored) : stored.body
+      const compressed = compress ? await this.compressStored(stored, acceptEncoding) : undefined
+      const payload = compressed?.body ?? stored.body
       response.writeHead(200, {
         ...responseHeaders,
         'Content-Length': payload.byteLength,
-        ...(compress ? { 'Content-Encoding': 'gzip' } : {}),
+        ...(compressed === undefined ? {} : { 'Content-Encoding': compressed.encoding }),
       })
       response.end(payload)
     } catch (error) {
@@ -2649,9 +2699,18 @@ export class MobileAccessGateway {
   }
 
   /** Compress a stored document once; the result is reused across requests. */
-  private async gzipStored(stored: StoredMobileIndex): Promise<Buffer> {
-    stored.gzipBody ??= await gzipBuffer(stored.body, { level: PROXY_GZIP_LEVEL })
-    return stored.gzipBody
+  private async compressStored(
+    stored: StoredMobileIndex | StoredMobileBootBatch,
+    acceptEncoding: string | undefined,
+  ): Promise<CompressedBody> {
+    const source = stored.body
+    if (source === undefined) throw new HttpError(502, 'upstream_unavailable')
+    if (acceptsBrotli(acceptEncoding)) {
+      stored.brBody ??= await brotliBuffer(source, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: PROXY_BROTLI_QUALITY } })
+      return { body: stored.brBody, encoding: 'br' }
+    }
+    stored.gzipBody ??= await gzipBuffer(source, { level: PROXY_GZIP_LEVEL })
+    return { body: stored.gzipBody, encoding: 'gzip' }
   }
 
   private rememberMobileBootBatch(plan: MobileBootBatchPlan): void {
@@ -2794,22 +2853,22 @@ export class MobileAccessGateway {
         const assembly = stored.assembly ?? this.startMobileBootBatchAssembly(stored, layoutStat.mtimeMs)
         await waitForRequestTask(assembly.task, operation.signal)
       }
-      const compressed = acceptsGzip(request.headers['accept-encoding'])
+      const acceptEncoding = request.headers['accept-encoding']
+      const compressed = acceptsBrotli(acceptEncoding) || acceptsGzip(acceptEncoding)
       // The assembly above assigns stored.body; TypeScript cannot narrow a
       // property written inside an awaited closure, so read it once here.
       const assembled = stored.body
       if (assembled === undefined) throw new HttpError(502, 'upstream_unavailable')
-      const body = compressed
-        ? stored.gzipBody ??= await gzipBuffer(assembled)
-        : assembled
-      const etag = `"${compressed ? `${stored.etag}-gzip` : stored.etag}"`
+      const compressedBody = compressed ? await this.compressStored(stored, acceptEncoding) : undefined
+      const body = compressedBody?.body ?? assembled
+      const etag = `"${compressed ? `${stored.etag}-${compressedBody?.encoding ?? 'gzip'}` : stored.etag}"`
       const headers: OutgoingHttpHeaders = {
         'Content-Type': 'text/javascript; charset=utf-8',
         'Content-Length': body.byteLength,
         'Cache-Control': 'private, no-cache',
         ETag: etag,
       }
-      if (compressed) headers['Content-Encoding'] = 'gzip'
+      if (compressed && compressedBody !== undefined) headers['Content-Encoding'] = compressedBody.encoding
       addVaryAcceptEncoding(headers)
       if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
         setSecurityHeaders(response, this.tlsEnabled)
@@ -2836,6 +2895,7 @@ export class MobileAccessGateway {
       const body = await this.assembleMobileBootBatch(stored.plan, controller.signal)
       stored.body = body
       delete stored.gzipBody
+      delete stored.brBody
       stored.etag = createHash('sha256').update(body).digest('hex')
       stored.layoutMtimeMs = layoutMtimeMs
       return body
@@ -3090,7 +3150,9 @@ export class MobileAccessGateway {
       const cacheControl = revisionedStaticCacheControl(request, statusCode)
       if (cacheControl !== undefined) headers['cache-control'] = cacheControl
       const compressible = canCompressResponse(request, proxied)
-      const compressed = compressible && acceptsGzip(request.headers['accept-encoding'])
+      const acceptEncoding = request.headers['accept-encoding']
+      const compressed = compressible && (acceptsBrotli(acceptEncoding) || acceptsGzip(acceptEncoding))
+      const useBrotli = compressed && acceptsBrotli(acceptEncoding)
       if (compressible) addVaryAcceptEncoding(headers)
       if (compressed) {
         delete headers['accept-ranges']
@@ -3098,7 +3160,7 @@ export class MobileAccessGateway {
         const etag = weakenEntityTag(proxied.headers.etag)
         if (etag === undefined) delete headers.etag
         else headers.etag = etag
-        headers['content-encoding'] = 'gzip'
+        headers['content-encoding'] = useBrotli ? 'br' : 'gzip'
       } else if (statusCode === 304 && (request.method === 'GET' || request.method === 'HEAD')
         && request.headers.range === undefined
         && (request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
@@ -3118,7 +3180,9 @@ export class MobileAccessGateway {
       await Promise.all([
         bodyDone,
         compressed && request.method !== 'HEAD'
-          ? pipeline(proxied, createGzip({ level: PROXY_GZIP_LEVEL }), response)
+          ? pipeline(proxied, useBrotli
+            ? createBrotliCompress({ params: { [zlibConstants.BROTLI_PARAM_QUALITY]: PROXY_BROTLI_QUALITY } })
+            : createGzip({ level: PROXY_GZIP_LEVEL }), response)
           : pipeline(proxied, response),
       ])
     } catch (error) {

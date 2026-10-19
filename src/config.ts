@@ -179,7 +179,10 @@ export const Config: z<PluginConfig> = z.object({
   mobileCompatibilityFile: z.string().hidden(),
   excludedClientModules: z.array(String).default([]),
   websocketCompression: z.object({
-    paths: z.array(String).default([]),
+    // The mobile page's whole real-time channel runs over /api/remote.mux, so
+    // session switches replay the transcript over that socket. Compressing it
+    // is on by default; a phone link is the constrained side.
+    paths: z.array(String).default(['/api/remote.mux']),
     maxMessageBytes: z.natural(),
     maxQueuedBytes: z.natural(),
     thresholdBytes: z.natural(),
@@ -230,7 +233,9 @@ function parseWebSocketCompression(raw: unknown): ResolvedWebSocketCompressionCo
   const maxQueuedBytes = integer(value.maxQueuedBytes, 'websocketCompression.maxQueuedBytes', 64 * 1024 * 1024, 1024, 256 * 1024 * 1024)
   if (maxQueuedBytes < maxMessageBytes + 14) throw new Error('websocketCompression.maxQueuedBytes must cover maxMessageBytes and the frame header')
   return Object.freeze({
-    paths: Object.freeze(normalizeWebSocketPaths(value.paths ?? [])),
+    // The mobile real-time channel runs over /api/remote.mux; compressing it is
+    // on by default so session-history replays over the phone link are smaller.
+    paths: Object.freeze(normalizeWebSocketPaths(value.paths ?? ['/api/remote.mux'])),
     maxMessageBytes,
     maxQueuedBytes,
     thresholdBytes: integer(value.thresholdBytes, 'websocketCompression.thresholdBytes', 1024, 0, maxMessageBytes),

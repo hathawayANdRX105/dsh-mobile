@@ -14,7 +14,7 @@ import { request as requestHttps } from 'node:https'
 import { isAbsolute, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { connect, Socket, type AddressInfo } from 'node:net'
-import { gunzipSync, gzipSync } from 'node:zlib'
+import { brotliDecompressSync, gunzipSync, gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway, type AuthFailureEntry } from '../src/gateway.js'
@@ -2318,11 +2318,11 @@ describe('HTTP gateway', () => {
       headers: { ...headers, 'accept-encoding': 'br, gzip, deflate' },
     })
     expect(compressed.status).toBe(200)
-    expect(compressed.headers['content-encoding']).toBe('gzip')
+    expect(compressed.headers['content-encoding']).toBe('br')
     expect(compressed.headers['content-length']).toBeUndefined()
     expect(compressed.headers.etag).toBe('W/"compressible-script"')
     expect(compressed.headers.vary).toBe('Accept-Encoding')
-    expect(gunzipSync(compressed.rawBody).toString('utf8')).toBe(COMPRESSIBLE_SCRIPT)
+    expect(brotliDecompressSync(compressed.rawBody).toString('utf8')).toBe(COMPRESSIBLE_SCRIPT)
     expect(compressed.rawBody.length).toBeLessThan(Buffer.byteLength(COMPRESSIBLE_SCRIPT) / 4)
 
     const identity = await request(instance.address().port, '/plugins/compressible.js', {

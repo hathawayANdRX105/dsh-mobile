@@ -26,13 +26,13 @@
   <a href="#compatibility">Compatibility</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.2">Release notes</a> ·
+  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.3">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.13-fork.2**. Performance-optimized fork of upstream 0.6.13: fixes the 60fps self-sustaining observer loop and the session-subtree materialization, merges and throttles the per-token document-wide queries, makes the mobile surface sync event-driven (filters conversation-streaming mutations, leading-edge 80ms throttle, layout-store subscription), adds a cached, ETag-validated and compressed GUI document, removes the non-compositable drawer width transition, and reserves the on-screen keyboard height. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.2) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.13-fork.3**. Performance-optimized fork of upstream 0.6.13: fixes the 60fps self-sustaining observer loop and the session-subtree materialization, merges and throttles the per-token document-wide queries, makes the mobile surface sync event-driven (filters conversation-streaming mutations, leading-edge 80ms throttle, layout-store subscription), adds a cached, ETag-validated GUI document compressed with brotli/gzip, compresses the mobile real-time channel by default (smaller session-switch transfers), removes the non-compositable drawer width transition, and reserves the on-screen keyboard height. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.3) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 

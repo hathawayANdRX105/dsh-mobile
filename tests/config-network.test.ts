@@ -45,9 +45,9 @@ describe('gateway configuration', () => {
     expect(() => parseGatewayConfig({ ...base, upstreamTimeoutMs: 0 })).toThrow(/upstreamTimeoutMs/u)
   })
 
-  it('keeps WebSocket compression opt-in and freezes validated paths and budgets', () => {
+  it('keeps WebSocket compression validated and freezes validated paths and budgets', () => {
     const base = { stateFile, controlFile, initiallyEnabled: false, tls: { mode: 'disabled' as const } }
-    expect(parseGatewayConfig(base).websocketCompression.paths).toEqual([])
+    expect(parseGatewayConfig(base).websocketCompression.paths).toEqual(['/api/remote.mux'])
     const paths = ['/api/remote.mux', '/api/remote.mux']
     const value = Config({ ...base, websocketCompression: { paths, maxMessageBytes: 2048, maxQueuedBytes: 4096 } })
     const resolved = parseGatewayConfig(value).websocketCompression
