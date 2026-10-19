@@ -1573,6 +1573,8 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   let toggle: HTMLButtonElement | undefined
   let viewArea: HTMLElement | undefined
   let scheduled = 0
+  let syncTimer = 0
+  let lastSyncAt = 0
   let transitionFrame = 0
   let transitionRestartFrame = 0
   let transitionTimer = 0
@@ -1826,9 +1828,60 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     if (frame !== undefined) sidebar.dataset.open = String(!classToken(sidebarRoot, '_collapsed'))
     backdrop.hidden = frame === undefined || !drawerScrimVisible(classToken(sidebarRoot, '_collapsed'), overlayQuery.matches)
   }
-  const schedule = (): void => { if (scheduled === 0) scheduled = requestAnimationFrame(sync) }
-  const observer = new MutationObserver(schedule)
+  /**
+   * Surface sync runs on the animation-frame budget, but a long conversation
+   * streams hundreds of DOM mutations per second. A leading-edge throttle keeps
+   * the first visible change immediate while collapsing the burst into at most
+   * one trailing sync per window — the mobile chrome only has to converge, it
+   * does not need per-frame attention.
+   */
+  const SYNC_THROTTLE_MS = 80
+  const runSync = (): void => {
+    scheduled = 0
+    if (syncTimer !== 0) {
+      window.clearTimeout(syncTimer)
+      syncTimer = 0
+    }
+    lastSyncAt = performance.now()
+    sync()
+  }
+  const schedule = (): void => {
+    const remaining = SYNC_THROTTLE_MS - (performance.now() - lastSyncAt)
+    if (remaining <= 0) {
+      if (scheduled === 0) scheduled = requestAnimationFrame(runSync)
+      return
+    }
+    if (syncTimer !== 0) return
+    syncTimer = window.setTimeout(() => {
+      syncTimer = 0
+      if (scheduled === 0) scheduled = requestAnimationFrame(runSync)
+    }, remaining)
+  }
+  // The observer stays on document.body because the chrome is remounted across
+  // session switches, but it filters before scheduling: transcript growth and
+  // message-row restyling inside the conversation view never move mobile
+  // chrome, so they are the one class of mutation that must not wake the sync.
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (viewArea !== undefined && viewArea.contains(record.target as Node)
+        && (record.type === 'childList' || record.attributeName === 'class')) {
+        continue
+      }
+      schedule()
+      return
+    }
+  })
   observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'disabled', 'readonly', 'aria-busy', 'aria-selected', 'data-dsh-mobile-session'] })
+  // The DSH layout store is the event source for drawer and details state, so a
+  // layout change is communicated instead of being re-detected from class
+  // mutations: subscribe to its panel info store and let the throttle decide
+  // when the sync actually runs.
+  const layoutStore = backServices.getLayout() as {
+    panelInfo?: { subscribe?: (listener: () => void) => () => void }
+  } | undefined
+  const removeLayoutListener = layoutStore?.panelInfo?.subscribe === undefined
+    ? undefined
+    : layoutStore.panelInfo.subscribe(schedule)
   overlayQuery.addEventListener('change', schedule)
   backdrop.addEventListener('click', () => { if (sidebar?.dataset.open === 'true') toggle?.click() })
   sync()
@@ -1904,6 +1957,9 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     branchToast.remove()
     mediaToast.remove()
     cameraButton.remove()
+    observer.disconnect()
+    removeLayoutListener?.()
+    if (syncTimer !== 0) window.clearTimeout(syncTimer)
     if (scheduled !== 0) cancelAnimationFrame(scheduled)
     if (transitionFrame !== 0) cancelAnimationFrame(transitionFrame)
     if (transitionRestartFrame !== 0) cancelAnimationFrame(transitionRestartFrame)
