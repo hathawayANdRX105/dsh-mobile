@@ -63,7 +63,7 @@ jobs:
       - name: Verify Android signature
         shell: bash
         env:
-          DSH_ANDROID_EXPECTED_CERT: 8CD37993629E206A2A0527D61E2B844144B5E0EEE5625C7FF9152989E1E59953
+          DSH_ANDROID_EXPECTED_CERT: 19F9ABFC2D535251B6BFBF6148E7E063A75A95B57FFA21925D7B6172DA5BB0EC
         run: |
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$apksigner"
