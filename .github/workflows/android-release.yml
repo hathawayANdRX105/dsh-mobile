@@ -27,38 +27,32 @@ jobs:
       - name: Install Android API 36
         run: sdkmanager "platforms;android-36"
       - uses: gradle/actions/setup-gradle@v6
-      - name: Secret diagnostic
-        env:
-          A: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          B: ${{ secrets.DSH_ANDROID_KEYSTORE_PASSWORD }}
-          C: ${{ secrets.DSH_ANDROID_KEY_ALIAS }}
-          D: ${{ secrets.DSH_ANDROID_KEY_PASSWORD }}
-        run: |
-          for n in A B C D; do
-            if [ -n "${!n}" ]; then echo "$n SET"; else echo "$n EMPTY"; fi
-          done
       - name: Configure release signing
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          DSH_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          DSH_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          DSH_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          BASE64_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DSH_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DSH_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.DSH_ANDROID_KEY_PASSWORD }}
         run: |
-          for name in ANDROID_KEYSTORE_BASE64 DSH_ANDROID_KEYSTORE_PASSWORD DSH_ANDROID_KEY_ALIAS DSH_ANDROID_KEY_PASSWORD; do
+          for name in BASE64_KEYSTORE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!name}" ]; then
               echo "Missing required Android signing secret: $name" >&2
               exit 1
             fi
           done
           umask 077
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/dsh-mobile-release.jks"
+          printf '%s' "$BASE64_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/dsh-mobile-release.jks"
       - name: Test and build signed Android package
         env:
           DSH_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/dsh-mobile-release.jks
-          DSH_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          DSH_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          DSH_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: bash ./gradlew --no-daemon lintDebug testDebugUnitTest assembleRelease -x lintAnalyzeDebugUnitTest -x lintAnalyzeDebugAndroidTest
+          KEYSTORE_PASSWORD: ${{ secrets.DSH_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DSH_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.DSH_ANDROID_KEY_PASSWORD }}
+        run: |
+          export DSH_ANDROID_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD"
+          export DSH_ANDROID_KEY_ALIAS="$KEY_ALIAS"
+          export DSH_ANDROID_KEY_PASSWORD="$KEY_PASSWORD"
+          bash ./gradlew --no-daemon lintDebug testDebugUnitTest assembleRelease -x lintAnalyzeDebugUnitTest -x lintAnalyzeDebugAndroidTest
         working-directory: apps/mobile/android
       - name: Remove signing keystore
         if: always()
