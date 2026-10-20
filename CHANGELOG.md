@@ -6,6 +6,10 @@ Notable changes are recorded here. GitHub Releases provide the downloadable pack
 
 - First fork-signed Android App build published from this repository ([release](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6)). It is the same 0.6.5 App source with the version bumped to 0.6.6 and signed with the fork's own release keystore, so it installs alongside (or replaces) the official App only after uninstalling the official App first; pairing is re-established by scanning a new QR code.
 
+## 0.6.13-fork.4 - 2026-10-20
+
+- Fix the mobile sidebar opening jank: the visible drawer root still animated its `width` from 0 to the full panel on every toggle, re-laying out the whole session list per frame and making the drawer appear to fill in progressively. The width now snaps to `min(88vw,340px)` immediately and the opening motion is a composited opacity/translate reveal (`dsh-mobile-sidebar-reveal`), matching the drawer fix. Measured on a paired 390×844 mobile page: the sidebar-root width is 340px at the first sampled frame after tapping, and only opacity/transform animate over 180ms.
+
 ## 0.6.13-fork.3 - 2026-10-20
 
 - Compress the mobile real-time channel by default: `/api/remote.mux` (the WebSocket every session switch replays the transcript over) now uses permessage-deflate unless `websocketCompression.paths` is overridden, so re-opening a session transfers smaller payloads to the phone.
