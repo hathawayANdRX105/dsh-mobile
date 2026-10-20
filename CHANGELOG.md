@@ -2,6 +2,10 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Android 0.6.6 (fork-signed) - 2026-10-20
+
+- First fork-signed Android App build published from this repository ([release](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6)). It is the same 0.6.5 App source with the version bumped to 0.6.6 and signed with the fork's own release keystore, so it installs alongside (or replaces) the official App only after uninstalling the official App first; pairing is re-established by scanning a new QR code.
+
 ## 0.6.13-fork.3 - 2026-10-20
 
 - Compress the mobile real-time channel by default: `/api/remote.mux` (the WebSocket every session switch replays the transcript over) now uses permessage-deflate unless `websocketCompression.paths` is overridden, so re-opening a session transfers smaller payloads to the phone.

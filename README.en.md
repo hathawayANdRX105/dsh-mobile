@@ -32,14 +32,14 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.13-fork.3**. Performance-optimized fork of upstream 0.6.13: fixes the 60fps self-sustaining observer loop and the session-subtree materialization, merges and throttles the per-token document-wide queries, makes the mobile surface sync event-driven (filters conversation-streaming mutations, leading-edge 80ms throttle, layout-store subscription), adds a cached, ETag-validated GUI document compressed with brotli/gzip, compresses the mobile real-time channel by default (smaller session-switch transfers), removes the non-compositable drawer width transition, and reserves the on-screen keyboard height. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.3) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.13-fork.3**. Performance-optimized fork of upstream 0.6.13: fixes the 60fps self-sustaining observer loop and the session-subtree materialization, merges and throttles the per-token document-wide queries, makes the mobile surface sync event-driven (filters conversation-streaming mutations, leading-edge 80ms throttle, layout-store subscription), adds a cached, ETag-validated GUI document compressed with brotli/gzip, compresses the mobile real-time channel by default (smaller session-switch transfers), removes the non-compositable drawer width transition, and reserves the on-screen keyboard height. Android App **0.6.6** (fork-signed) is published from this branch and needs no matching update. [Release notes and downloads](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/v0.6.13-fork.3) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><strong>Download Android app 0.6.5</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5">Release notes and checksums</a></sub>
+  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><strong>Download Android app 0.6.6</strong></a><br>
+  <sub><a href="https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
