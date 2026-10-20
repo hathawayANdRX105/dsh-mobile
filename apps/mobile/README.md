@@ -4,14 +4,14 @@
 
 DeepSeek Harness is the display name of this community-maintained Android WebView app. It opens the plugin's authenticated HTTPS page rather than bundling another DSH frontend. The app and mobile browsers receive the same DSH features and computer-side mobile customizations.
 
-The current stable app is **0.6.5** (build 81). The npm plugin and Android App have independent versions: a plugin update does not automatically require another APK. See the [0.6.5 changes](#065-update).
+The current stable app is **0.6.6** (build 82). The npm plugin and Android App have independent versions: a plugin update does not automatically require another APK. See the [0.6.6 changes](#066-update).
 
 Android 10 or later is supported. The local iOS experiment is not a published or supported client.
 
 ## Install and pair
 
 1. Install and enable the plugin using the [project quick start](../../README.en.md#quick-start). Complete LAN setup from the command line or the computer's **Mobile Access** panel.
-2. Install the signed Android APK from [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5). Upgrade an official installation in place using the same release signer to retain its pairings. A differently signed Debug APK cannot replace it; do not uninstall or clear data just to bypass that mismatch.
+2. Install the signed Android APK from [GitHub Releases](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6). Upgrade an official installation in place using the same release signer to retain its pairings. A differently signed Debug APK cannot replace it; do not uninstall or clear data just to bypass that mismatch.
 3. On the computer, generate a pairing key/link under **Mobile Access → Local network**, or configure a remote provider and generate its remote pairing QR code. In the app, choose the matching connection mode and scan or paste the link.
 4. Name the computer. The app stores each LAN or remote pairing as its own record. The phone does not need a cpolar, Cloudflare or Tailscale app.
 
@@ -35,9 +35,9 @@ Page zoom changes the whole page and is separate from per-address text preferenc
 
 Deleting a local record removes its saved token and pinned CA, not the computer's authorization or every short-lived WebView cookie. Use **Mobile Access** on the computer to revoke access immediately. A full Android clear-app-data reset removes all pairings and web data and is not a normal reconnection step.
 
-## 0.6.5 update
+## 0.6.6 update
 
-Android 0.6.5/build 81 adds an immediate **Cancel connection** action during startup, saved-computer connection, LAN scanning and pairing. Cancellation returns to the device list or editable form without deleting existing pairings. **Stop reconnecting** retains a usable DSH page; a blank or failed document returns to the list.
+Android 0.6.6/build 82 is the fork-signed build of the same App source as 0.6.5/build 81, which adds an immediate **Cancel connection** action during startup, saved-computer connection, LAN scanning and pairing. Cancellation returns to the device list or editable form without deleting existing pairings. **Stop reconnecting** retains a usable DSH page; a blank or failed document returns to the list.
 
 The initial wait uses the whale-girl background, a centered loading indicator and a cancellation button, without a separate modal dialog. A trusted page's first visible commit reveals its own loading progress immediately. A small, nonblocking Cancel button remains until usable page controls appear; the app does not wait for every image or require a particular layout class.
 
@@ -120,7 +120,7 @@ Set-Location apps/mobile/android
 
 The Debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Official releases use the established signing key stored only in repository Secrets. A local unsigned Release build or a Debug install is not official-signer evidence.
 
-The verified stable release is [Android 0.6.5](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5), SHA-256 `41bd476c5ccf90020ecf624844a29886d55060a79533b599e9aa5bf0a1d71844`. Earlier release history belongs in [CHANGELOG](../../CHANGELOG.md).
+The fork-published stable release is [Android 0.6.6](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6), SHA-256 `180774b0acb10fa510d4364931d1a66c97f0d991c04caac15efb84cc9e104106`. Earlier release history belongs in [CHANGELOG](../../CHANGELOG.md).
 
 ## Acceptance and known limits
 

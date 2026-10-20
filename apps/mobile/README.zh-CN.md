@@ -4,14 +4,14 @@
 
 DeepSeek Harness 是这个社区维护的 Android WebView App 的显示名称。它直接打开插件提供的已认证 HTTPS 页面，不打包另一套 DSH 前端；App 与手机浏览器获得相同的 DSH 功能，以及电脑端配置的移动页面定制。
 
-当前正式 App 为 **0.6.5**；构建号为 81。npm 插件与 Android App 独立编号、独立更新；插件升级不代表需要重新安装 APK。此次改进见 [0.6.5 更新](#065-更新)。
+当前正式 App 为 **0.6.6**；构建号为 82。npm 插件与 Android App 独立编号、独立更新；插件升级不代表需要重新安装 APK。此次改进见 [0.6.6 更新](#066-更新)。
 
 支持 Android 10 及以上系统。iOS 本地实验不属于已发布或受支持的客户端。
 
 ## 安装与配对
 
 1. 按[项目快速开始](../../README.md#快速开始)安装并启用插件。局域网配置可通过命令行或电脑端的 **移动访问** 面板完成。
-2. 从 [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5) 安装已签名 APK。正式版沿用相同发布签名，可原位升级并保留配对；不同签名的 Debug 包不能直接覆盖正式版，不要为绕过签名不匹配而卸载或清除数据。
+2. 从 [GitHub Releases](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6) 安装已签名 APK。正式版沿用相同发布签名，可原位升级并保留配对；不同签名的 Debug 包不能直接覆盖正式版，不要为绕过签名不匹配而卸载或清除数据。
 3. 在电脑 **移动访问 → 局域网访问** 中生成密钥／配对链接，或配置远程通道并生成远程配对二维码。在 App 选择对应方式，扫码或粘贴链接。
 4. 为电脑命名。每条局域网或远程配对单独保存；手机无需安装 cpolar、Cloudflare 或 Tailscale App。
 
@@ -35,7 +35,7 @@ DeepSeek Harness 是这个社区维护的 Android WebView App 的显示名称。
 
 删除本机记录会移除保存的设备令牌和固定 CA，不等于撤销电脑授权或清除所有 WebView 短期 Cookie。需要立即终止访问时，请在电脑的 **移动访问** 中撤销设备。Android“清除应用数据”会删除全部配对和网页数据，不是普通重连的处理步骤。
 
-## 0.6.5 更新
+## 0.6.6 更新
 
 Android 0.6.5／构建 81 在启动连接、已配对电脑连接、局域网扫描和配对过程中均提供立即可用的 **取消连接**。取消后回到设备列表或可编辑表单，不删除原有配对；**停止重连**保留仍可用的 DSH 页面，空白或失效文档则返回列表。
 
@@ -120,7 +120,7 @@ Set-Location apps/mobile/android
 
 Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。正式发布沿用只保存在仓库 Secrets 中的签名密钥，本地未签名 Release 构建或 Debug 安装不能替代正式签名核验。
 
-已核验的正式版本为 [Android 0.6.5](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5)，SHA-256：`41bd476c5ccf90020ecf624844a29886d55060a79533b599e9aa5bf0a1d71844`。旧版本历史集中在 [CHANGELOG](../../CHANGELOG.md)。
+已核验的正式版本为 [Android 0.6.5](https://github.com/hathawayANdRX105/dsh-mobile/releases/tag/android-v0.6.6)，SHA-256：`41bd476c5ccf90020ecf624844a29886d55060a79533b599e9aa5bf0a1d71844`。旧版本历史集中在 [CHANGELOG](../../CHANGELOG.md)。
 
 ## 验收与已知限制
 
