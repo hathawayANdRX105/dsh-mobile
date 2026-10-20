@@ -27,6 +27,16 @@ jobs:
       - name: Install Android API 36
         run: sdkmanager "platforms;android-36"
       - uses: gradle/actions/setup-gradle@v6
+      - name: Secret diagnostic
+        env:
+          A: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          B: ${{ secrets.DSH_ANDROID_KEYSTORE_PASSWORD }}
+          C: ${{ secrets.DSH_ANDROID_KEY_ALIAS }}
+          D: ${{ secrets.DSH_ANDROID_KEY_PASSWORD }}
+        run: |
+          for n in A B C D; do
+            if [ -n "${!n}" ]; then echo "$n SET"; else echo "$n EMPTY"; fi
+          done
       - name: Configure release signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
