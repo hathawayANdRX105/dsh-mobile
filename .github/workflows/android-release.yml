@@ -62,6 +62,8 @@ jobs:
         working-directory: apps/mobile/android
       - name: Verify Android signature
         shell: bash
+        env:
+          DSH_ANDROID_EXPECTED_CERT: 8CD37993629E206A2A0527D61E2B844144B5E0EEE5625C7FF9152989E1E59953
         run: |
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$apksigner"

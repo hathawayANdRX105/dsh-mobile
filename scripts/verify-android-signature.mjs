@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs'
 
 // Run only after apksigner verify succeeds; this checks the established release identity.
-const expected = 'f46bbee7dbe47d18f49f95f940e1d368f0b79bd8ad9d15d488337fba51e92e87'
+// Fork builds sign with their own release keystore, so the expected release
+// certificate is supplied by the workflow (DSH_ANDROID_EXPECTED_CERT); the
+// upstream release certificate remains the default.
+const expected = (process.env.DSH_ANDROID_EXPECTED_CERT
+  ?? 'f46bbee7dbe47d18f49f95f940e1d368f0b79bd8ad9d15d488337fba51e92e87').toLowerCase()
 const lines = readFileSync(0, 'utf8').split(/\r?\n/u).map(line => line.trim())
 const signerCounts = lines.filter(line => line.startsWith('Number of signers:'))
 const certificates = lines.filter(line => line.includes('certificate SHA-256 digest:'))
